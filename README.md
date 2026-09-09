@@ -432,14 +432,19 @@ Two photos are wired into the theme, and both are optional. Save them here:
 
 | File | Where it shows up |
 |---|---|
-| `app/web/static/img/called.png` | Behind every called number on a guest's card |
-| `app/web/static/img/bingo.png` | In the round badge on the BINGO popup |
+| `app/web/static/img/photo1.png` | Behind every called number on a card, and in the popup |
+| `app/web/static/img/photo2.png` | In the popup |
 
-If a file is missing the app falls back to plain colours, so nothing breaks at
-the party if you skip this. Square crops work best — `bingo.png` is masked into a
-circle. Keep each one under roughly 200 KB, since guests load them on mobile
-data. For `called.png`, avoid busy detail in the middle: a number sits on top of
-it, with a dark shadow so it stays readable either way.
+The popup picks one of the two at random each time somebody wins, so guests see
+both over a party. Called numbers always use `photo1.png`, because a grid of 24
+cells flipping between two faces is noisy and the number has to stay readable on
+top of it.
+
+If a file is missing the app falls back to plain colours and a gradient, so
+nothing breaks at the party if you skip this. Square crops work best — the popup
+masks them into a circle. Keep each one under roughly 200 KB, since guests load
+them on mobile data. For `photo1.png`, avoid busy detail in the middle: a number
+sits on top of it, with a dark shadow so it stays readable either way.
 
 **Restart the server after adding the files**, then hard-refresh the browser
 (`Ctrl`+`F5`). Phones cache images aggressively, so a guest who loaded the page
@@ -451,7 +456,8 @@ round is affected.
 
 The whole look lives in `app/web/static/theme.css`. Deleting its `<link>` from
 `app/web/templates/base.html` returns the app to the plain styling and changes
-nothing else.
+nothing else. To add a third photo to the rotation, or drop one, edit the
+`PHOTOS` list in `app/web/static/celebrate.js`.
 
 ## Game history
 
