@@ -574,3 +574,101 @@ table.grid td.just-called {
     outline-offset: -3px;
   }
 }
+
+/* --- Game history --- */
+
+.header-actions { display: flex; gap: 0.5rem; align-items: center; }
+
+.history-list { list-style: none; margin: 0.8rem 0 0; padding: 0; }
+
+.history-row { border-bottom: 1px solid var(--line); }
+.history-row:last-child { border-bottom: 0; }
+
+.history-link {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  grid-template-areas:
+    "code outcome when"
+    "code meta    meta";
+  gap: 0.1rem 0.9rem;
+  align-items: center;
+  padding: 0.75rem 0.4rem;
+  color: inherit;
+  text-decoration: none;
+  border-radius: 8px;
+}
+
+.history-link:hover { background: var(--bg); }
+
+.history-code {
+  grid-area: code;
+  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  padding: 0.25rem 0.5rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--free);
+}
+
+.history-outcome { grid-area: outcome; font-weight: 600; }
+.history-meta { grid-area: meta; color: var(--muted); font-size: 0.82rem; }
+.history-when { grid-area: when; color: var(--muted); font-size: 0.8rem; white-space: nowrap; }
+
+.detail-grid {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.3rem 1rem;
+  margin: 1rem 0 0;
+  font-size: 0.92rem;
+}
+
+.detail-grid dt { color: var(--muted); }
+.detail-grid dd { margin: 0; font-weight: 600; }
+
+.claim-list { list-style: none; margin: 0.6rem 0 0; padding: 0; }
+
+.claim-row {
+  padding: 0.6rem 0.75rem;
+  margin-bottom: 0.4rem;
+  border: 1px solid var(--line);
+  border-left: 4px solid var(--line);
+  border-radius: 8px;
+  font-size: 0.9rem;
+}
+
+.claim-row.claim-ok { border-left-color: var(--accent); }
+.claim-row .hint { display: block; margin-top: 0.25rem; }
+
+.call-history {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin: 0.6rem 0 0;
+  padding: 0;
+  list-style: none;
+  counter-reset: call;
+}
+
+.call-history li {
+  counter-increment: call;
+  padding: 0.28rem 0.5rem;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  font-size: 0.8rem;
+  font-variant-numeric: tabular-nums;
+  background: var(--bg);
+}
+
+.call-history li::before {
+  content: counter(call) ". ";
+  color: var(--muted);
+}
+
+/* Ang inaangkin ng bisita sa cards-only mode. Iba ang kulay sa aktuwal na
+   marka, dahil sabi lang niya ito at hindi pa napatunayan. */
+table.grid td.claimed {
+  background: var(--alert-bg);
+  color: var(--alert-ink);
+  font-weight: 700;
+}

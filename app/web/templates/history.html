@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% block title %}Game history - BingoBanano{% endblock %}
+
+{% block header_extra %}
+<a class="btn ghost" href="/kiosk">Lobby</a>
+{% endblock %}
+
+{% block content %}
+<section class="panel">
+  <h1>Game history</h1>
+
+  {% if not rounds %}
+  <p class="muted">No rounds yet. Create one from the lobby and it will show up here.</p>
+  {% else %}
+  <p class="muted">Newest first. {{ rounds|length }} round{{ "s" if rounds|length != 1 else "" }}.</p>
+
+  <ul class="history-list">
+    {% for round in rounds %}
+    <li class="history-row">
+      <a class="history-link" href="/history/{{ round.id }}">
+        <span class="history-code">{{ round.join_code }}</span>
+        <span class="history-outcome">{{ outcome_line(round) }}</span>
+        <span class="history-meta">
+          {{ round.game_type }}
+          {%- if round.game_type == "classic" %} &middot; {{ round.pattern.replace("_", " ") }}{% endif %}
+          &middot; {{ round.player_count }} player{{ "s" if round.player_count != 1 else "" }}
+          &middot; {{ round.draw_count }} ball{{ "s" if round.draw_count != 1 else "" }}
+          {%- if round.duration_seconds %} &middot; {{ round.duration_seconds // 60 }}m
+            {{- round.duration_seconds % 60 }}s{% endif %}
+        </span>
+        <span class="history-when">{{ round.created_at.strftime("%b %d, %H:%M") }}</span>
+      </a>
+    </li>
+    {% endfor %}
+  </ul>
+  {% endif %}
+</section>
+{% endblock %}

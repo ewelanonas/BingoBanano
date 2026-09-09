@@ -2,7 +2,10 @@
 {% block title %}Caller - {{ round.join_code }}{% endblock %}
 
 {% block header_extra %}
-<a class="btn ghost" href="/kiosk">Lobby</a>
+<span class="header-actions">
+  <a class="btn ghost" href="/history/{{ round.id }}">This round</a>
+  <a class="btn ghost" href="/kiosk">Lobby</a>
+</span>
 {% endblock %}
 
 {% block content %}
@@ -192,8 +195,9 @@
     return response.json();
   }
 
-  function renderCards(container, cards) {
+  function renderCards(container, cards, marks) {
     const header = ["B", "I", "N", "G", "O"];
+    const marked = new Set(marks || []);
     for (const card of cards) {
       const figure = document.createElement("figure");
       figure.className = "bingo-card";
@@ -219,8 +223,13 @@
         const tr = document.createElement("tr");
         for (const value of row) {
           const td = document.createElement("td");
-          if (value === 0) { td.className = "free"; td.textContent = "FREE"; }
-          else { td.textContent = String(value); }
+          if (value === 0) {
+            td.className = "free claimed";
+            td.textContent = "FREE";
+          } else {
+            td.textContent = String(value);
+            if (marked.has(value)) { td.className = "claimed"; }
+          }
           tr.append(td);
         }
         tbody.append(tr);
@@ -235,13 +244,26 @@
     if (noClaimsEl) { noClaimsEl.hidden = true; }
     const block = document.createElement("div");
     block.className = "announcement";
+
     const heading = document.createElement("p");
     heading.className = "announcement-name";
-    heading.textContent = `${payload.player_name} called BINGO`;
+    const when = new Date().toLocaleTimeString();
+    heading.textContent = `${payload.player_name} called BINGO at ${when}`;
     block.append(heading);
+
+    const note = document.createElement("p");
+    note.className = "hint";
+    const count = (payload.reported_marks || []).length;
+    note.textContent = count
+      ? `Highlighted cells are the ${count} number${count === 1 ? "" : "s"} they say `
+        + "they marked. Check them against the numbers you called."
+      : "They marked nothing on their phone. Check the card against the numbers "
+        + "you called.";
+    block.append(note);
+
     const cards = document.createElement("div");
     cards.className = "card-list";
-    renderCards(cards, payload.cards);
+    renderCards(cards, payload.cards, payload.reported_marks);
     block.append(cards);
     claimsEl.prepend(block);
   }

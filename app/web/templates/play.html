@@ -213,7 +213,13 @@
 
   bingoButton.addEventListener("click", async () => {
     bingoButton.disabled = true;
-    const response = await fetch(`/api/play/${TOKEN}/bingo`, { method: "POST" });
+    // Sa cards-only mode ay ipinapadala ang marka para may matingnan ang host.
+    // Display lang ito: hindi ito ginagamit ng server sa anumang desisyon.
+    const response = await fetch(`/api/play/${TOKEN}/bingo`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ marked: FREE_MARKING ? [...marked] : [] }),
+    });
     const data = await response.json().catch(() => ({}));
     messageEl.textContent = data.message || data.detail || "Could not send the claim.";
     if (!data.verified) {

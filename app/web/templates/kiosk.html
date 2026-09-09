@@ -2,9 +2,12 @@
 {% block title %}Host lobby - BingoBanano{% endblock %}
 
 {% block header_extra %}
-<form method="post" action="/operator/logout" class="inline">
-  <button type="submit" class="btn ghost">Sign out</button>
-</form>
+<span class="header-actions">
+  <a class="btn ghost" href="/history">History</a>
+  <form method="post" action="/operator/logout" class="inline">
+    <button type="submit" class="btn ghost">Sign out</button>
+  </form>
+</span>
 {% endblock %}
 
 {% block content %}

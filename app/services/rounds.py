@@ -256,6 +256,7 @@ async def verify_claim(
     game: GameRound,
     player: Player,
     cards: list[BingoCard],
+    reported_marks: list[int] | None = None,
 ) -> ClaimOutcome:
     """I-verify ang BINGO gamit ang naka-store na card at ang naka-store na draws.
 
@@ -283,6 +284,7 @@ async def verify_claim(
             missing=0,
             draw_count=draw_count,
             at=now,
+            reported_marks=reported_marks,
         )
 
     if game.status not in (ROUND_DRAWING, ROUND_WON):
@@ -378,6 +380,7 @@ async def _record_claim(
     draw_count: int,
     at: object,
     is_first_winner: bool = False,
+    reported_marks: list[int] | None = None,
 ) -> ClaimOutcome:
     savepoint = await db.begin_nested()
     db.add(
@@ -392,6 +395,7 @@ async def _record_claim(
             missing_cells=missing,
             is_first_winner=is_first_winner,
             claimed_at=at,
+            reported_marks=reported_marks or [],
         )
     )
     try:

@@ -21,7 +21,7 @@ from fastapi import (
     status,
 )
 from fastapi.responses import HTMLResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -47,6 +47,16 @@ from app.services.events import get_broker
 router = APIRouter()
 
 _WS_PING_SECONDS = 20.0
+
+
+class ClaimRequest(BaseModel):
+    """Ang minarkahan ng bisita sa phone niya.
+
+    Ginagamit LANG sa cards-only mode, at pang-display lang para sa host. Hindi
+    ito pinagbabatayan ng anumang desisyon ng server.
+    """
+
+    marked: list[int] = Field(default_factory=list, max_length=75)
 
 
 class ClaimResponse(BaseModel):
@@ -188,6 +198,7 @@ async def claim_bingo(
     request: Request,
     token: str,
     db: Annotated[AsyncSession, Depends(get_db)],
+    payload: ClaimRequest | None = None,
 ) -> ClaimResponse:
     """Ang pinindot na BINGO. Ang server ang nagve-verify, hindi ang phone.
 
@@ -216,8 +227,19 @@ async def claim_bingo(
             detail="This is an elimination round, so there is nothing to claim.",
         )
 
+    # Ang marka ay tinatanggap lang kung walang binibilang ang server, at
+    # display lang ang gamit. Sa tracked modes ay may draw table na basehan,
+    # kaya wala tayong pakialam sa sinasabi ng phone.
+    reported = (
+        sorted({n for n in payload.marked if 1 <= n <= 75})
+        if payload and game.caller_mode == CALLER_OFFLINE
+        else []
+    )
+
     try:
-        outcome = await rounds.verify_claim(db, game=game, player=player, cards=cards)
+        outcome = await rounds.verify_claim(
+            db, game=game, player=player, cards=cards, reported_marks=reported
+        )
     except rounds.RoundError as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
 
@@ -234,8 +256,8 @@ async def claim_bingo(
         )
     elif outcome.reason == CLAIM_ANNOUNCED:
         # Offline mode: walang draw table na maihahambing, kaya ang host ang
-        # titingin. Ipinapadala ang naka-store na card sa caller screen para
-        # may tiningnan siya — galing sa server ang layout, hindi sa phone.
+        # titingin. Ang card layout ay galing sa server; ang marka ay galing sa
+        # phone at nakatatak bilang inaangkin lang, hindi katotohanan.
         winning = next((c for c in cards if c.serial == outcome.card_serial), cards[0])
         await get_broker().publish(
             round_topic(game.id),
@@ -244,6 +266,7 @@ async def claim_bingo(
                 "player_name": player.given_name,
                 "cards": [_card_payload(card) for card in cards],
                 "card_serial": winning.serial,
+                "reported_marks": reported,
             },
         )
 

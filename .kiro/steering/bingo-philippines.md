@@ -111,6 +111,38 @@ Mga rule:
   bago. Pero huwag kislapin ang galing sa snapshot — dating tawag na iyon.
 - **Igalang ang `prefers-reduced-motion`.** Palitan ng outline ang animation, at
   huwag itong tanggalin nang walang kapalit.
+
+## 1d. Kapag ang tao ang judge
+
+Sa `offline` mode ay walang maihahambing ang server, kaya ang host ang nagpapasya.
+Huwag magpanggap na kaya nitong mag-verify.
+
+Ang tamang gawi doon:
+
+- **Ipadala ang marka ng player, pero tatakan bilang inaangkin lang.** Iba ang
+  kulay sa aktuwal na marka, at may nakasulat na galing ito sa phone at hindi sa
+  server. Kailangan ito ng host para may matingnan; kung wala, blangkong card
+  lang ang makikita niya.
+- **Huwag itong gamitin sa anumang desisyon ng server.** Sa tracked modes ay
+  hindi man lang ito tinatanggap — may draw table na basehan doon.
+- **Itala ang claim kahit hindi verified.** Iyon lang ang tanging record ng
+  napagdesisyunan sa mode na iyon.
+
+## 1e. Game history
+
+Ang mga round ay dapat may naitatalang salaysay: sino ang nanalo, sa anong bola,
+anong sequence ng bola, at lahat ng pinindot na BINGO kasama ang tinanggihan.
+
+Mga rule:
+
+- **Huwag gumawa ng bagong table para dito.** Nasa `GameRound`, `Draw`,
+  `BingoCard`, at `Claim` na ang lahat. Ang history ay view lang.
+- **Iba ang pinagmumulan ng panalo depende sa laro.** Sa classic ay ang verified
+  na `Claim`; sa elimination ay ang `BingoCard.is_winner`. Huwag pagsamahin.
+- **Isama ang tinanggihang claim.** Doon lumilitaw ang bug sa marking o ang
+  hindi pagkakaintindihan sa rule.
+- **Sabihin kung walang naitala.** Sa `offline` ay walang draw sequence, at
+  dapat malinaw na sinasabi iyon kaysa magpakita ng blangko.
 - **Mahaba ito.** Sa live na test, 74 sa 75 na bola ang kinailangan sa tatlong
   player. Sabihin ito sa user, huwag hayaang magulat.
 

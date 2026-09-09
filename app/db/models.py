@@ -167,6 +167,12 @@ class Claim(Base):
     is_first_winner: Mapped[bool] = mapped_column(Boolean, default=False)
     claimed_at: Mapped[datetime] = mapped_column(UtcDateTime())
 
+    # Sa cards-only mode ay walang binibilang ang server, kaya ang host ang
+    # nagpapasya. Ito ang sinasabi ng phone na minarkahan ng bisita — hindi
+    # katotohanan, kundi ang inaangkin niya, at ipinapakita sa host para may
+    # matingnan siya. Hindi ito ginagamit sa anumang verification.
+    reported_marks: Mapped[list[int]] = mapped_column(JSON, default=list)
+
     __table_args__ = (
         UniqueConstraint("round_id", "card_id", "draw_count", name="uq_claim_card_draw"),
     )

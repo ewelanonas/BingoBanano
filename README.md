@@ -26,6 +26,8 @@ Guests only enter a nickname. No accounts, no sign-up, no app to install.
   own when the app is not tracking, plus a "numbers needed" counter and a BINGO
   button
 - **Server-side verification** — no marking data is accepted from the phone
+- **Game history** — every past round with its winner, ball sequence and BINGO
+  calls, including the rejected ones
 
 ## Requirements
 
@@ -159,8 +161,11 @@ themselves and BINGO is still verified for you. One click per ball is all it
 costs.
 
 Pick the last option if you do not want to touch the laptop during the game at
-all. The app becomes a card dispenser, guests tap their own numbers, and you
-verify a BINGO by eye against the card the caller screen shows you.
+all. The app becomes a card dispenser and guests tap their own numbers. When
+someone presses BINGO, their card appears on the caller screen with the numbers
+they say they marked highlighted, so you can check it against what you actually
+called. Those highlights come from their phone, not from the server, and the screen
+says so — you are the judge in that mode.
 
 Press **Create round** and a join code appears.
 
@@ -406,7 +411,21 @@ If you would rather not use `cloudflared`, `ngrok http 8000` gives an equivalent
 HTTPS URL; paste it into `.env` as `BINGO_PUBLIC_BASE_URL` yourself and start the
 server with the same proxy flags.
 
-## When phones cannot reach the server
+## Game history
+
+**History** in the lobby header lists every round, newest first, with the outcome
+in one line: who won and on which ball, or who survived longest in elimination, or
+how many BINGOs were called if the host decided it. Each row opens a detail page
+with the full ball sequence in order, every player and their card, and every BINGO
+call including the rejected ones and why they were rejected.
+
+For cards-only rounds it also records the numbers the guest said they had marked
+when they called. There is nothing else to go on in that mode, so keeping the claim
+is the only record of what was decided.
+
+History uses data the app already stores, so no round needs to be treated
+specially to appear there. It survives restarts; it goes away when you reset the
+database.
 
 This is the most common problem. First test:
 
@@ -462,7 +481,7 @@ app/
   services/    # pairing, rounds, issuance, audit, events
   api/         # HTTP and WebSocket routes
   web/         # Jinja2 templates and CSS
-tests/         # 122 tests
+tests/         # 135 tests
 scripts/       # setup-dev.ps1, start-tunnel.ps1
 ```
 
@@ -519,6 +538,12 @@ for being the last one standing, before any game had been played.
 two numbers, so a single call can finish several cards at once, and splitting a win
 there is fairer than picking arbitrarily.
 
+**Marks reported by a phone are stored as a claim, never as truth.** In cards-only
+mode the server has no calls to check against, so the guest's marks are recorded on
+the claim and shown to the host clearly labelled as what they say they marked. In
+the tracked modes the same field is left empty, because a draw table already exists
+and there is no reason to care what a phone asserts.
+
 **Only a nickname is stored about a player.** No birth date, no email, no ID. A
 player's live board is reachable through an unguessable capability URL rather than
 a login.
@@ -532,7 +557,7 @@ cannot use, so that falls back to `BINGO_PUBLIC_BASE_URL`.
 ## Development
 
 ```powershell
-.\.venv\Scripts\python.exe -m pytest -q          # 122 tests
+.\.venv\Scripts\python.exe -m pytest -q          # 135 tests
 .\.venv\Scripts\python.exe -m ruff check .
 .\.venv\Scripts\python.exe -m ruff format .
 .\.venv\Scripts\python.exe -m mypy               # strict on app/domain

@@ -1,0 +1,103 @@
+{% extends "base.html" %}
+{% set summary = detail.summary %}
+{% block title %}Round {{ summary.join_code }} - BingoBanano{% endblock %}
+
+{% block header_extra %}
+<a class="btn ghost" href="/history">All rounds</a>
+{% endblock %}
+
+{% block content %}
+<section class="panel">
+  <h1>Round <span class="join-code">{{ summary.join_code }}</span></h1>
+  {% if summary.label %}<p class="muted">{{ summary.label }}</p>{% endif %}
+
+  <div class="verdict" data-state="{% if summary.winners %}winner{% else %}in{% endif %}">
+    {{ outcome_line(summary) }}
+  </div>
+
+  <dl class="detail-grid">
+    <dt>Game</dt>
+    <dd>
+      {{ summary.game_type }}
+      {%- if summary.game_type == "classic" %}, {{ summary.pattern.replace("_", " ") }}{% endif %}
+    </dd>
+    <dt>Numbers called by</dt>
+    <dd>
+      {% if summary.caller_mode == "auto" %}the app
+      {% elif summary.caller_mode == "manual" %}the host's own machine, entered in
+      {% else %}the host's own machine, not tracked{% endif %}
+    </dd>
+    <dt>Players</dt><dd>{{ summary.player_count }}</dd>
+    <dt>Balls drawn</dt><dd>{{ summary.draw_count }}</dd>
+    <dt>Status</dt><dd>{{ summary.status }}</dd>
+    <dt>Started</dt><dd>{{ summary.created_at.strftime("%b %d, %Y at %H:%M") }}</dd>
+    {% if summary.duration_seconds %}
+    <dt>Took</dt>
+    <dd>{{ summary.duration_seconds // 60 }}m {{ summary.duration_seconds % 60 }}s</dd>
+    {% endif %}
+  </dl>
+
+  <h2 class="section-title">Players</h2>
+  {% if not detail.players %}
+  <p class="muted">Nobody joined this round.</p>
+  {% else %}
+  <ul class="roster">
+    {% for player in detail.players %}
+    <li class="roster-row {% if player.is_winner %}winner-row{% elif player.out_at_draw %}out{% endif %}">
+      <span class="roster-name">{{ player.name }}</span>
+      <span class="roster-numbers"><b>{{ player.serial }}</b></span>
+      <span class="roster-state">
+        {% if player.is_winner %}winner
+        {% elif player.out_at_draw %}out at ball {{ player.out_at_draw }}
+        {% else %}played{% endif %}
+      </span>
+    </li>
+    {% endfor %}
+  </ul>
+  {% endif %}
+
+  <h2 class="section-title">BINGO calls</h2>
+  {% if not detail.claims %}
+  <p class="muted">
+    {% if summary.game_type == "elimination" %}
+    Elimination has no BINGO button — knockouts are automatic.
+    {% else %}
+    Nobody pressed BINGO.
+    {% endif %}
+  </p>
+  {% else %}
+  <ul class="claim-list">
+    {% for claim in detail.claims %}
+    <li class="claim-row {% if claim.verified %}claim-ok{% endif %}">
+      <strong>{{ claim.player_name }}</strong>
+      on {{ claim.serial }} at ball {{ claim.at_draw }} &mdash;
+      {{ reason_label(claim.reason) }}
+      {%- if not claim.verified and claim.missing %}, {{ claim.missing }} short{% endif %}
+      {%- if claim.is_first_winner %} (first){% endif %}
+      {% if claim.reported_marks %}
+      <span class="hint">
+        They said they had marked {{ claim.reported_marks|length }} numbers:
+        {{ claim.reported_marks|join(", ") }}
+      </span>
+      {% endif %}
+    </li>
+    {% endfor %}
+  </ul>
+  {% endif %}
+
+  <h2 class="section-title">Numbers called, in order</h2>
+  {% if not detail.calls %}
+  <p class="muted">
+    {% if summary.caller_mode == "offline" %}
+    This round did not track numbers, so there is nothing recorded here.
+    {% else %}
+    No numbers were drawn.
+    {% endif %}
+  </p>
+  {% else %}
+  <ol class="call-history">
+    {% for call in detail.calls %}<li>{{ call }}</li>{% endfor %}
+  </ol>
+  {% endif %}
+</section>
+{% endblock %}
