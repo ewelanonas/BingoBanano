@@ -36,7 +36,8 @@
 [CmdletBinding()]
 param(
     [int]$Port = 8000,
-    [switch]$StartServer
+    [switch]$StartServer,
+    [switch]$Http2
 )
 
 $ErrorActionPreference = 'Stop'
@@ -55,6 +56,16 @@ $serverArgs = @(
     '--proxy-headers', '--forwarded-allow-ips=127.0.0.1'
 )
 
+# Ang PowerShell 5.1 ay minsan nagne-negotiate ng TLS 1.0 at tinatanggihan iyon
+# ng Cloudflare. Itinatakda natin nang tahasan para hindi maling dahilan ang
+# ipinapakita ng probe.
+try {
+    [Net.ServicePointManager]::SecurityProtocol =
+        [Net.SecurityProtocolType]::Tls12 -bor [Net.SecurityProtocolType]::Tls11
+} catch {
+    Write-Verbose 'Hindi maitakda ang TLS version; ipagpapatuloy sa default.'
+}
+
 function Test-ServerUp {
     try {
         $null = Invoke-WebRequest -Uri "http://127.0.0.1:$Port/healthz" -UseBasicParsing -TimeoutSec 3
@@ -62,6 +73,62 @@ function Test-ServerUp {
     } catch {
         return $false
     }
+}
+
+function Test-PublicUrl([string]$Url) {
+    <#
+        Ibinabalik ang isang object na may Ok at Detail. Ang Detail ang totoong
+        dahilan — dati ay itinatago ito at listahan ng hula ang ipinapakita.
+    #>
+    $host_ = ([Uri]$Url).Host
+
+    # 1. DNS. Ang *.trycloudflare.com ay hinaharangan ng ilang ISP, router, at
+    #    security suite dahil abusado ito sa phishing.
+    try {
+        $null = [Net.Dns]::GetHostEntry($host_)
+    } catch {
+        return [pscustomobject]@{
+            Ok     = $false
+            Detail = "Hindi ma-resolve ang $host_ mula sa makinang ito. Malamang " +
+                     'hinaharangan ng DNS, router, o antivirus ang trycloudflare.com. ' +
+                     'Baka gumagana pa rin ito sa phone na naka-mobile data.'
+        }
+    }
+
+    # 2. HTTPS via PowerShell, na dumadaan sa system proxy.
+    try {
+        $probe = Invoke-WebRequest -Uri "$Url/healthz" -UseBasicParsing -TimeoutSec 10
+        if ($probe.Content -match '"ok"') {
+            return [pscustomobject]@{ Ok = $true; Detail = 'Sumagot ang public URL.' }
+        }
+        return [pscustomobject]@{
+            Ok     = $false
+            Detail = "Sumagot pero hindi healthz ang laman: $($probe.StatusCode)"
+        }
+    } catch {
+        $psError = $_.Exception.Message
+    }
+
+    # 3. Pangalawang opinyon gamit ang curl.exe, na HINDI dumadaan sa system
+    #    proxy. Kapag ito ang pumasa, ang PowerShell o ang proxy ang problema
+    #    at hindi ang tunnel.
+    $curl = Get-Command curl.exe -ErrorAction SilentlyContinue
+    if ($curl) {
+        $code = & $curl.Source -s -o NUL -w '%{http_code}' --max-time 10 "$Url/healthz" 2>&1
+        if ($code -eq '200') {
+            return [pscustomobject]@{
+                Ok     = $true
+                Detail = 'Bumagsak ang PowerShell probe pero pumasa ang curl. ' +
+                         'Gumagana ang tunnel; ang PowerShell o proxy ang may isyu.'
+            }
+        }
+        return [pscustomobject]@{
+            Ok     = $false
+            Detail = "PowerShell: $psError | curl http_code: $code"
+        }
+    }
+
+    return [pscustomobject]@{ Ok = $false; Detail = "PowerShell: $psError" }
 }
 
 function Wait-ForServer([int]$Seconds = 15) {
@@ -150,9 +217,17 @@ if (Test-ServerUp) {
 Write-Step "Binubuksan ang tunnel papunta sa http://127.0.0.1:$Port"
 Write-Note 'Ang unang koneksyon ay tumatagal ng ilang segundo.'
 
+$tunnelArgs = @('tunnel', '--no-autoupdate', '--url', "http://127.0.0.1:$Port")
+if ($Http2) {
+    # Ang default ng cloudflared ay QUIC sa UDP 7844. Hinaharangan iyon ng
+    # maraming home router at ISP, at ang resulta ay tunnel na mukhang bukas
+    # pero hindi naghahatid. Ang http2 ay dumadaan sa TCP 443.
+    $tunnelArgs += @('--protocol', 'http2')
+    Write-Note 'Gumagamit ng http2 protocol (TCP 443) kaysa QUIC.'
+}
+
 $logFile = Join-Path ([System.IO.Path]::GetTempPath()) "bingobanano-tunnel-$PID.log"
-$process = Start-Process -FilePath $cloudflared.Source `
-    -ArgumentList 'tunnel', '--no-autoupdate', '--url', "http://127.0.0.1:$Port" `
+$process = Start-Process -FilePath $cloudflared.Source -ArgumentList $tunnelArgs `
     -RedirectStandardError $logFile -RedirectStandardOutput "$logFile.out" `
     -NoNewWindow -PassThru
 
@@ -187,31 +262,55 @@ try {
     # --- 4. Subukan mismo ang public URL ----------------------------------
 
     Write-Step 'Sinusubukan ang public URL'
-    $healthy = $false
-    for ($i = 0; $i -lt 12 -and -not $healthy; $i++) {
-        try {
-            $probe = Invoke-WebRequest -Uri "$publicUrl/healthz" -UseBasicParsing -TimeoutSec 8
-            $healthy = $probe.Content -match '"ok"'
-        } catch {
-            Start-Sleep -Seconds 2
-        }
+    $result = $null
+    for ($i = 0; $i -lt 6; $i++) {
+        $result = Test-PublicUrl $publicUrl
+        if ($result.Ok) { break }
+        Start-Sleep -Seconds 3
     }
 
-    if ($healthy) {
-        Write-Good 'Sagot ang public URL. Puwede nang mag-scan ang mga bisita.'
+    if ($result.Ok) {
+        Write-Good $result.Detail
+        Write-Good 'Puwede nang mag-scan ang mga bisita.'
     } else {
-        Write-Warn 'Hindi sumagot ang public URL pagkatapos ng ~25 segundo.'
-        Write-Note '  - Kung 1033 ang lumabas: hindi pa tapos ang tunnel, hintayin'
-        Write-Note '  - Kung 502: hindi sumasagot ang server sa 127.0.0.1'
-        Write-Note "  - Tingnan: Invoke-WebRequest http://127.0.0.1:$Port/healthz"
-        Write-Note '  - Baka may firewall o proxy na humaharang sa cloudflared'
+        Write-Warn 'Hindi kumpirmado ang public URL mula sa makinang ito.'
+        Write-Note $result.Detail
+        Write-Host @"
+
+    MAHALAGA: hindi ito nangangahulugang sira ang tunnel. Ang test na ito ay
+    mula sa makinang ito, at maraming bagay ang puwedeng humarang lokal —
+    DNS filtering ng trycloudflare.com, corporate proxy, antivirus, o TLS
+    setting ng PowerShell.
+
+    Bago mag-conclude, SUBUKAN ANG LINK SA PHONE MO:
+
+        $publicUrl/healthz
+
+    Kung {"status":"ok"} ang lumabas doon, gumagana ang tunnel at puwede ka
+    nang maglaro — probe lang ang bigo. Kung error 1033 sa phone, doon lang
+    talagang patay ang tunnel.
+
+    Kung 1033 talaga: karaniwang dahilan ay hinaharangan ng router ang QUIC
+    (UDP 7844) na default ng cloudflared. Subukan ito:
+
+        Ctrl+C, tapos: .\scripts\start-tunnel.ps1 -StartServer -Http2
+
+    Huling 15 linya ng cloudflared log:
+"@ -ForegroundColor Yellow
+        foreach ($path in @($logFile, "$logFile.out")) {
+            if (Test-Path $path) {
+                Get-Content $path -Tail 15 -ErrorAction SilentlyContinue |
+                    ForEach-Object { Write-Note $_ }
+            }
+        }
     }
 
     Write-Host @"
 
     HOST LOBBY : $publicUrl/operator
+    HEALTH TEST: $publicUrl/healthz
 
-    Buksan ang link na iyon sa browser. Iyon din ang mapupunta sa QR — kinukuha
+    Buksan ang HOST LOBBY sa browser. Iyon din ang mapupunta sa QR — kinukuha
     ito ng app mula sa address na binuksan mo, kaya walang .env na babaguhin at
     walang restart na kailangan.
 

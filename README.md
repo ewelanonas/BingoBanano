@@ -199,6 +199,31 @@ Open the tunnel URL plus `/operator` and host the game exactly as before. The QR
 now contains the public HTTPS link, so guests can scan it from mobile data,
 another Wi-Fi, or another city.
 
+### If the script says it cannot confirm the public URL
+
+The script tests the public URL from your own machine. That test can fail while
+the tunnel is perfectly fine, because it depends on your local DNS, proxy, and
+TLS setup. `*.trycloudflare.com` in particular is blocked by some ISPs, routers,
+and antivirus suites since it gets abused for phishing.
+
+So the script prints the real error rather than a guess, and tells you to check
+from your phone before concluding anything:
+
+```
+https://<your-tunnel>.trycloudflare.com/healthz
+```
+
+`{"status":"ok"}` on the phone means the tunnel works and only the local test
+failed. Go ahead and play.
+
+**Error 1033 on the phone** means the tunnel really is not connected. The usual
+cause is your router blocking QUIC on UDP 7844, which `cloudflared` uses by
+default. Force it onto TCP 443 instead:
+
+```powershell
+.\scripts\start-tunnel.ps1 -StartServer -Http2
+```
+
 ### The tunnel URL is disposable
 
 Every run of the script gets a **different** random URL, and the URL dies the
