@@ -266,11 +266,17 @@
         ? `${payload.call} is on your card.`
         : `${payload.call} called.`;
     } else if (payload.event === "round_won") {
-      messageEl.textContent =
-        `${payload.player_name} won with ${payload.card_serial} on ball ${payload.draw_count}.`;
-      // Ang nanalo ay nakakita na ng popup mula sa sagot ng claim niya.
-      if (payload.player_name !== PLAYER_NAME) {
+      const mine = payload.player_name === PLAYER_NAME;
+      // Sa cards-only ay ang host ang nagpasya, at walang naitalang bola.
+      messageEl.textContent = payload.confirmed_by_host
+        ? `${payload.player_name} won with ${payload.card_serial}.`
+        : `${payload.player_name} won with ${payload.card_serial} on ball ${payload.draw_count}.`;
+      // Sa tracked modes ay nakakita na ng popup ang nanalo mula sa sagot ng
+      // claim niya. Sa cards-only ay ito ang unang beses na may kasiguruhan.
+      if (!mine) {
         showCelebration(`${payload.player_name} won!`);
+      } else if (payload.confirmed_by_host) {
+        showCelebration(`${PLAYER_NAME}, the host confirmed it!`);
       }
     }
   });

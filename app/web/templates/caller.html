@@ -69,6 +69,8 @@
     </div>
     {% endif %}
 
+    {# Para masilip ang popup at ang litrato bago pa dumating ang mga bisita. #}
+    <button id="preview-button" type="button" class="btn ghost">Preview popup</button>
     <button id="close-button" type="button" class="btn ghost">Close round</button>
   </div>
 
@@ -268,8 +270,34 @@
     cards.className = "card-list";
     renderCards(cards, payload.cards, payload.reported_marks);
     block.append(cards);
+
+    // Walang maidedeklara ang server sa mode na ito, kaya ang host ang
+    // nagpapasya. Ito ang pindutan na nagtatala ng pasya niya at nag-aanunsyo
+    // nito sa lahat ng phone.
+    const confirm = document.createElement("button");
+    confirm.type = "button";
+    confirm.className = "btn primary";
+    confirm.textContent = `Confirm ${payload.player_name} as the winner`;
+    confirm.addEventListener("click", async () => {
+      confirm.disabled = true;
+      const data = await post(`/api/rounds/${ROUND_ID}/confirm-win`, {
+        card_serial: payload.card_serial,
+      });
+      if (data) {
+        setStatus(`${payload.player_name} confirmed as the winner.`);
+      } else {
+        confirm.disabled = false;
+      }
+    });
+    block.append(confirm);
+
     claimsEl.prepend(block);
   }
+
+  // Local lang ito. Walang naipapadala sa server at wala itong naaapektuhan.
+  document.getElementById("preview-button").addEventListener("click", () => {
+    showCelebration("This is a preview, nobody has won yet");
+  });
 
   startButton.addEventListener("click", async () => {
     const data = await post(`/api/rounds/${ROUND_ID}/start`);
@@ -331,8 +359,10 @@
     } else if (payload.event === "round_won") {
       setRoundStatus("won");
       winnerEl.hidden = false;
-      winnerEl.textContent =
-        `BINGO! ${payload.player_name} - ${payload.card_serial} on ball ${payload.draw_count}`;
+      // Sa cards-only ay walang naitalang bola, kaya walang bilang na sasabihin.
+      winnerEl.textContent = payload.confirmed_by_host
+        ? `BINGO! ${payload.player_name} - ${payload.card_serial}, confirmed by you`
+        : `BINGO! ${payload.player_name} - ${payload.card_serial} on ball ${payload.draw_count}`;
       showCelebration(`${payload.player_name} - ${payload.card_serial}`);
     } else if (payload.event === "bingo_announced") {
       showAnnouncement(payload);

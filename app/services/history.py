@@ -13,6 +13,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import (
+    CALLER_OFFLINE,
     CLAIM_ANNOUNCED,
     GAME_ELIMINATION,
     BingoCard,
@@ -73,7 +74,10 @@ class RoundDetail:
 
 async def _winner_names(db: AsyncSession, game: GameRound) -> list[str]:
     """Sino ang nanalo. Iba ang pinagmumulan depende sa laro."""
-    if game.game_type == GAME_ELIMINATION:
+    # Sa elimination ay ang card ang may hawak ng resulta. Ganoon din sa
+    # cards-only: walang verified na claim doon dahil walang naiverify ang
+    # server, kaya ang minarkahan ng host ang tanging record ng panalo.
+    if game.game_type == GAME_ELIMINATION or game.caller_mode == CALLER_OFFLINE:
         rows = await db.execute(
             select(Player.given_name)
             .join(BingoCard, BingoCard.player_id == Player.id)
@@ -193,6 +197,9 @@ def outcome_line(summary: RoundSummary) -> str:
         names = " and ".join(summary.winners)
         if summary.game_type == GAME_ELIMINATION:
             return f"{names} survived to ball {summary.draw_count}"
+        # Walang naitalang bola sa cards-only, kaya walang bilang na masasabi.
+        if summary.caller_mode == CALLER_OFFLINE:
+            return f"{names} won, confirmed by the host"
         return f"{names} won on ball {summary.draw_count}"
 
     if summary.status == "won":  # pragma: no cover - panalo pero walang pangalan

@@ -127,6 +127,39 @@ async def get_round_by_code(db: AsyncSession, join_code: str) -> GameRound | Non
     return await db.scalar(select(GameRound).where(GameRound.join_code == join_code.upper()))
 
 
+async def confirm_offline_win(db: AsyncSession, *, game: GameRound, card_serial: str) -> str:
+    """Itala ang desisyon ng host sa cards-only mode. Ibinabalik ang pangalan.
+
+    Sa `offline` ay walang draw table, kaya hindi kayang mag-verify ng server at
+    hindi ito nagdedeklara ng panalo. Ang host ang tumitingin sa card. Pero kapag
+    nagdesisyon na siya, may dapat itala at may dapat ipaalam sa lahat — kung
+    wala ito, ang tanging record ng natapos na laro ay ang hindi pa napagpasyahang
+    claim, at walang makikitang anunsyo ang mga bisita.
+
+    Ang itinatala ay ang desisyon ng tao, hindi konklusyon ng server. Hindi
+    ginagalaw ang `Claim` rows: append-only ang audit trail na iyon.
+    """
+    if game.caller_mode != CALLER_OFFLINE:
+        raise RoundError("This round tracks its own numbers, so it decides the winner itself.")
+    if game.status not in (ROUND_DRAWING, ROUND_WON):
+        raise RoundError("This round is not running, so a win cannot be confirmed.")
+
+    card = await db.scalar(
+        select(BingoCard).where(BingoCard.round_id == game.id, BingoCard.serial == card_serial)
+    )
+    if card is None:
+        raise RoundError("That card is not in this round.")
+
+    player = await db.get(Player, card.player_id)
+    if player is None:  # pragma: no cover - foreign key ang nagbabantay dito
+        raise RoundError("That card has no player.")
+
+    card.is_winner = True
+    game.status = ROUND_WON
+    await db.flush()
+    return player.given_name
+
+
 async def active_rounds(db: AsyncSession) -> list[GameRound]:
     """Ang mga round na tumatakbo pa: bukas sa pagsali o nagbubunot na.
 

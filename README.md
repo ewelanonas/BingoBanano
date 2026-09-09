@@ -223,7 +223,11 @@ There is no toggle between the two. If a number looks tappable, it is; if the ap
 is tracking the calls, the card just lights up and there is nothing to press.
 
 When the "Needed" counter reaches 0, the BINGO button lights up. Guests press it
-and the server decides.
+and the server decides — except in cards-only mode, where the server has no ball
+sequence to check against and cannot decide anything. There the claim appears on
+your caller screen with the card, and you press **Confirm as the winner** once you
+have checked it. That is what announces the win to everybody's phone. Until you
+press it, the round stays open, because only you know whether the claim was good.
 
 In cards-only mode, marks are saved on the guest's own phone, so a locked screen or
 a closed tab does not wipe the card — which matters because the server does not
@@ -436,6 +440,14 @@ the party if you skip this. Square crops work best — `bingo.png` is masked int
 circle. Keep each one under roughly 200 KB, since guests load them on mobile
 data. For `called.png`, avoid busy detail in the middle: a number sits on top of
 it, with a dark shadow so it stays readable either way.
+
+**Restart the server after adding the files**, then hard-refresh the browser
+(`Ctrl`+`F5`). Phones cache images aggressively, so a guest who loaded the page
+before you added them may need to reload too.
+
+To check the popup without waiting for someone to win, press **Preview popup** on
+the caller screen. It is local to that page: nothing is sent to the server and no
+round is affected.
 
 The whole look lives in `app/web/static/theme.css`. Deleting its `<link>` from
 `app/web/templates/base.html` returns the app to the plain styling and changes

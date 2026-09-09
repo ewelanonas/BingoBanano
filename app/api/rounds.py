@@ -52,6 +52,12 @@ class CreateRoundRequest(BaseModel):
     caller_mode: str = CALLER_AUTO
 
 
+class ConfirmWinRequest(BaseModel):
+    """Ang card na pinasyahan ng host bilang panalo sa cards-only mode."""
+
+    card_serial: str
+
+
 class DrawRequest(BaseModel):
     # Kailangan sa manual mode: ang bolang lumabas sa pisikal na tambiolo.
     # Dapat walang laman sa auto mode.
@@ -250,6 +256,50 @@ async def draw_ball(
         remaining=result.remaining,
         status=game.status,
     )
+
+
+@router.post(
+    "/api/rounds/{round_id}/confirm-win",
+    response_model=RoundResponse,
+    dependencies=[Depends(require_operator)],
+)
+async def confirm_win(
+    round_id: str,
+    payload: ConfirmWinRequest,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> RoundResponse:
+    """Ang host ang nagpapasya sa cards-only mode. Ito ang pagtatala ng pasya."""
+    game = await rounds.get_round(db, round_id)
+    if game is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="That round does not exist."
+        )
+    try:
+        winner = await rounds.confirm_offline_win(db, game=game, card_serial=payload.card_serial)
+    except rounds.RoundError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+
+    await audit.record(
+        db,
+        event="round.win_confirmed",
+        outcome=audit.OUTCOME_OK,
+        detail={"round": game.id, "card": payload.card_serial},
+    )
+    await db.commit()
+    await get_broker().publish(
+        round_topic(round_id),
+        {
+            "event": "round_won",
+            "player_name": winner,
+            "card_serial": payload.card_serial,
+            "draw_count": 0,
+            "is_first_winner": True,
+            # Sinasabi nito sa mga page na huwag magbanggit ng bola: walang
+            # naitalang sequence sa mode na ito.
+            "confirmed_by_host": True,
+        },
+    )
+    return await _summary(db, round_id)
 
 
 @router.post(
