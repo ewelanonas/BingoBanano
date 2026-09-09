@@ -10,21 +10,31 @@
   </p>
 
   <div class="call-strip">
+    {% if not free_marking %}
     <div class="call-big" id="last-call" aria-live="polite">
       {{ round.last_call or "--" }}
     </div>
+    {% endif %}
     <dl class="call-meta">
+      {% if not free_marking %}
       <dt>Drawn</dt><dd id="draw-count">{{ round.draw_count }}</dd>
+      {% endif %}
       <dt>Needed</dt><dd id="missing">--</dd>
     </dl>
   </div>
 
+  {% if free_marking %}
+  <p class="hint">
+    Tap your numbers as the host calls them. Tap again to undo a mistake.
+  </p>
+  {% else %}
   <div class="field checkbox daub-toggle">
     <input id="auto-daub" type="checkbox" checked>
     <label for="auto-daub">
       Mark my numbers automatically. Turn this off to tap them yourself.
     </label>
   </div>
+  {% endif %}
 
   <button id="bingo-button" type="button" class="btn bingo">BINGO!</button>
   <p id="claim-message" class="status" role="status" aria-live="polite"></p>
@@ -72,6 +82,8 @@
   const TOKEN = {{ token | tojson }};
   const PATTERN_GROUPS = {{ pattern_groups | tojson }};
   const CARDS = {{ cards | tojson }};
+  // Kapag walang binibilang ang app, walang maihahambing kaya malaya ang pagpindot.
+  const FREE_MARKING = {{ free_marking | tojson }};
 
   const lastCallEl = document.getElementById("last-call");
   const drawCountEl = document.getElementById("draw-count");
@@ -136,7 +148,7 @@
 
   function registerDraw(ball) {
     drawn.add(ball);
-    if (autoDaub.checked) {
+    if (autoDaub && autoDaub.checked) {
       setMarked(ball, true);
     } else {
       paint(ball);
@@ -147,9 +159,9 @@
   for (const button of document.querySelectorAll("button.dab")) {
     button.addEventListener("click", () => {
       const ball = Number(button.dataset.ball);
-      if (!drawn.has(ball)) {
-        // Not called yet. Refuse rather than let someone mark ahead and then
-        // wonder why their BINGO was rejected.
+      if (!FREE_MARKING && !drawn.has(ball)) {
+        // Not called yet, and the server is tracking. Refuse rather than let
+        // someone mark ahead and then wonder why their BINGO was rejected.
         refuse(ball);
         messageEl.textContent = `${ball} has not been called yet.`;
         return;
@@ -158,12 +170,14 @@
     });
   }
 
-  autoDaub.addEventListener("change", () => {
-    if (!autoDaub.checked) { return; }
-    // Catch up on anything already called but not yet dabbed.
-    for (const ball of drawn) { marked.add(ball); paint(ball); }
-    updateMissing();
-  });
+  if (autoDaub) {
+    autoDaub.addEventListener("change", () => {
+      if (!autoDaub.checked) { return; }
+      // Catch up on anything already called but not yet dabbed.
+      for (const ball of drawn) { marked.add(ball); paint(ball); }
+      updateMissing();
+    });
+  }
 
   bingoButton.addEventListener("click", async () => {
     bingoButton.disabled = true;
@@ -182,13 +196,13 @@
     const payload = JSON.parse(event.data);
     if (payload.event === "snapshot") {
       for (const ball of payload.drawn) { registerDraw(ball); }
-      lastCallEl.textContent = payload.last_call || "--";
-      drawCountEl.textContent = payload.draw_count;
+      if (lastCallEl) { lastCallEl.textContent = payload.last_call || "--"; }
+      if (drawCountEl) { drawCountEl.textContent = payload.draw_count; }
       updateMissing();
     } else if (payload.event === "ball_drawn") {
       registerDraw(payload.ball);
-      lastCallEl.textContent = payload.call;
-      drawCountEl.textContent = payload.sequence_no;
+      if (lastCallEl) { lastCallEl.textContent = payload.call; }
+      if (drawCountEl) { drawCountEl.textContent = payload.sequence_no; }
     } else if (payload.event === "round_won") {
       messageEl.textContent =
         `${payload.player_name} won with ${payload.card_serial} on ball ${payload.draw_count}.`;

@@ -29,7 +29,7 @@ from app.api.deps import templates
 from app.api.rounds import round_topic
 from app.api.security import enforce_rate_limit
 from app.config import get_settings
-from app.db.models import BingoCard, GameRound, Player
+from app.db.models import CALLER_OFFLINE, CLAIM_ANNOUNCED, BingoCard, GameRound, Player
 from app.db.session import get_db
 from app.domain.cards import GRID_SIZE
 from app.domain.draws import TOTAL_BALLS
@@ -103,6 +103,8 @@ async def play_board(
             "cards": [_card_payload(card) for card in cards],
             "pattern_groups": pattern_cell_groups(game.pattern),
             "total_balls": TOTAL_BALLS,
+            # Kapag walang binibilang ang app, malayang makakapindot ang player.
+            "free_marking": game.caller_mode == CALLER_OFFLINE,
         },
     )
 
@@ -190,6 +192,20 @@ async def claim_bingo(
                 "is_first_winner": outcome.is_first_winner,
             },
         )
+    elif outcome.reason == CLAIM_ANNOUNCED:
+        # Offline mode: walang draw table na maihahambing, kaya ang host ang
+        # titingin. Ipinapadala ang naka-store na card sa caller screen para
+        # may tiningnan siya — galing sa server ang layout, hindi sa phone.
+        winning = next((c for c in cards if c.serial == outcome.card_serial), cards[0])
+        await get_broker().publish(
+            round_topic(game.id),
+            {
+                "event": "bingo_announced",
+                "player_name": player.given_name,
+                "cards": [_card_payload(card) for card in cards],
+                "card_serial": winning.serial,
+            },
+        )
 
     return ClaimResponse(
         verified=outcome.verified,
@@ -207,6 +223,8 @@ def _message_for(outcome: rounds.ClaimOutcome) -> str:
         return f"BINGO! You won with {outcome.card_serial}."
     if outcome.verified:
         return f"BINGO! You tied with someone on ball {outcome.draw_count}."
+    if outcome.reason == CLAIM_ANNOUNCED:
+        return "BINGO called. The host is checking your card."
     if outcome.reason == "round_not_drawing":
         return "The round has not started yet."
     if outcome.reason == "late":

@@ -15,6 +15,21 @@
     {{ round.player_count }} players &middot; {{ round.card_count }} cards
   </p>
 
+  {% if round.caller_mode == "offline" %}
+  <p class="alert" role="note">
+    This round is not tracking numbers. Use your own bingo machine and call the
+    numbers out loud. Guests mark their cards freely, and when someone presses
+    BINGO their cards appear here for you to check.
+  </p>
+  {% elif round.caller_mode == "manual" %}
+  <p class="alert" role="note">
+    Manual mode. Spin your own machine, then click the number that came out on
+    the board below. Everyone's cards mark themselves and BINGO is still checked
+    automatically.
+  </p>
+  {% endif %}
+
+  {% if round.caller_mode != "offline" %}
   <div class="call-strip">
     <div class="call-big" id="last-call" aria-live="assertive">
       {{ round.last_call or "--" }}
@@ -25,12 +40,15 @@
       <dt>Status</dt><dd id="round-status">{{ round.status }}</dd>
     </dl>
   </div>
+  {% endif %}
 
   <div class="row controls">
     <button id="start-button" type="button" class="btn primary"
             {% if round.status != "open" %}disabled{% endif %}>
       Start round
     </button>
+
+    {% if round.caller_mode == "auto" %}
     <button id="draw-button" type="button" class="btn primary"
             {% if round.status != "drawing" %}disabled{% endif %}>
       Draw next ball
@@ -41,23 +59,39 @@
       <input id="auto-seconds" type="number" min="2" max="30" value="6" class="tiny">
       <span class="muted">s</span>
     </div>
+    {% endif %}
+
     <button id="close-button" type="button" class="btn ghost">Close round</button>
   </div>
 
   <p id="status" class="status" role="status" aria-live="polite"></p>
   <div id="winner" class="winner" hidden></div>
 
-  <h2 class="section-title">Board</h2>
-  <div class="board" id="board">
+  {% if round.caller_mode == "offline" %}
+  <h2 class="section-title">Called BINGOs</h2>
+  <p class="hint" id="no-claims">Nobody has called BINGO yet.</p>
+  <div id="claims" class="card-list" aria-live="polite"></div>
+
+  {% else %}
+  <h2 class="section-title">
+    {% if round.caller_mode == "manual" %}Click the number that came out{% else %}Board{% endif %}
+  </h2>
+  <div class="board {% if round.caller_mode == 'manual' %}board-clickable{% endif %}" id="board">
     {% for letter in "BINGO" %}
     <div class="board-column">
       <div class="board-letter">{{ letter }}</div>
       {% for ball in range(loop.index0 * 15 + 1, loop.index0 * 15 + 16) %}
+      {% if round.caller_mode == "manual" %}
+      <button type="button" class="board-ball board-pick" id="ball-{{ ball }}"
+              data-ball="{{ ball }}">{{ ball }}</button>
+      {% else %}
       <div class="board-ball" id="ball-{{ ball }}">{{ ball }}</div>
+      {% endif %}
       {% endfor %}
     </div>
     {% endfor %}
   </div>
+  {% endif %}
 </section>
 {% endblock %}
 
@@ -65,6 +99,7 @@
 <script>
   const CSRF_TOKEN = {{ csrf_token | tojson }};
   const ROUND_ID = {{ round.id | tojson }};
+  const CALLER_MODE = {{ round.caller_mode | tojson }};
   const headers = { "Content-Type": "application/json", "X-CSRF-Token": CSRF_TOKEN };
 
   const lastCallEl = document.getElementById("last-call");
@@ -78,37 +113,49 @@
   const closeButton = document.getElementById("close-button");
   const autoDraw = document.getElementById("auto-draw");
   const autoSeconds = document.getElementById("auto-seconds");
+  const claimsEl = document.getElementById("claims");
+  const noClaimsEl = document.getElementById("no-claims");
 
   let autoTimer = null;
   const setStatus = (text) => { statusEl.textContent = text; };
 
   function markBall(ball) {
-    document.getElementById(`ball-${ball}`)?.classList.add("drawn");
+    const cell = document.getElementById(`ball-${ball}`);
+    if (!cell) { return; }
+    cell.classList.add("drawn");
+    // Sa manual mode, hindi na puwedeng pindutin muli ang nailabas na.
+    if (cell.tagName === "BUTTON") { cell.disabled = true; }
   }
 
   function applySnapshot(data) {
     for (const ball of data.drawn) { markBall(ball); }
-    lastCallEl.textContent = data.last_call || "--";
-    drawCountEl.textContent = data.draw_count;
-    remainingEl.textContent = data.remaining;
+    if (lastCallEl) { lastCallEl.textContent = data.last_call || "--"; }
+    if (drawCountEl) { drawCountEl.textContent = data.draw_count; }
+    if (remainingEl) { remainingEl.textContent = data.remaining; }
     setRoundStatus(data.status);
   }
 
   function setRoundStatus(value) {
-    statusTextEl.textContent = value;
+    if (statusTextEl) { statusTextEl.textContent = value; }
     startButton.disabled = value !== "open";
-    drawButton.disabled = value !== "drawing";
+    if (drawButton) { drawButton.disabled = value !== "drawing"; }
+    document.querySelectorAll("button.board-pick").forEach((b) => {
+      if (value !== "drawing") { b.disabled = true; }
+      else if (!b.classList.contains("drawn")) { b.disabled = false; }
+    });
     if (value !== "drawing") { stopAuto(); }
   }
 
   function stopAuto() {
     clearInterval(autoTimer);
     autoTimer = null;
-    autoDraw.checked = false;
+    if (autoDraw) { autoDraw.checked = false; }
   }
 
-  async function post(path) {
-    const response = await fetch(path, { method: "POST", headers });
+  async function post(path, body) {
+    const options = { method: "POST", headers };
+    if (body !== undefined) { options.body = JSON.stringify(body); }
+    const response = await fetch(path, options);
     if (!response.ok) {
       const problem = await response.json().catch(() => ({}));
       setStatus(problem.detail || "That action did not go through.");
@@ -117,17 +164,84 @@
     return response.json();
   }
 
+  function renderCards(container, cards) {
+    const header = ["B", "I", "N", "G", "O"];
+    for (const card of cards) {
+      const figure = document.createElement("figure");
+      figure.className = "bingo-card";
+      const caption = document.createElement("figcaption");
+      caption.textContent = card.serial;
+      figure.append(caption);
+
+      const table = document.createElement("table");
+      table.className = "grid";
+      const thead = document.createElement("thead");
+      const headRow = document.createElement("tr");
+      for (const letter of header) {
+        const th = document.createElement("th");
+        th.scope = "col";
+        th.textContent = letter;
+        headRow.append(th);
+      }
+      thead.append(headRow);
+      table.append(thead);
+
+      const tbody = document.createElement("tbody");
+      for (const row of card.rows) {
+        const tr = document.createElement("tr");
+        for (const value of row) {
+          const td = document.createElement("td");
+          if (value === 0) { td.className = "free"; td.textContent = "FREE"; }
+          else { td.textContent = String(value); }
+          tr.append(td);
+        }
+        tbody.append(tr);
+      }
+      table.append(tbody);
+      figure.append(table);
+      container.append(figure);
+    }
+  }
+
+  function showAnnouncement(payload) {
+    if (noClaimsEl) { noClaimsEl.hidden = true; }
+    const block = document.createElement("div");
+    block.className = "announcement";
+    const heading = document.createElement("p");
+    heading.className = "announcement-name";
+    heading.textContent = `${payload.player_name} called BINGO`;
+    block.append(heading);
+    const cards = document.createElement("div");
+    cards.className = "card-list";
+    renderCards(cards, payload.cards);
+    block.append(cards);
+    claimsEl.prepend(block);
+  }
+
   startButton.addEventListener("click", async () => {
     const data = await post(`/api/rounds/${ROUND_ID}/start`);
     if (data) {
       setRoundStatus(data.status);
-      setStatus("Round started. Joining is now closed.");
+      setStatus(CALLER_MODE === "offline"
+        ? "Round started. Joining is now closed — call your numbers out loud."
+        : "Round started. Joining is now closed.");
     }
   });
 
-  drawButton.addEventListener("click", async () => {
-    const data = await post(`/api/rounds/${ROUND_ID}/draw`);
-    if (!data) { stopAuto(); }
+  if (drawButton) {
+    drawButton.addEventListener("click", async () => {
+      const data = await post(`/api/rounds/${ROUND_ID}/draw`);
+      if (!data) { stopAuto(); }
+    });
+  }
+
+  document.querySelectorAll("button.board-pick").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const ball = Number(button.dataset.ball);
+      button.disabled = true;
+      const data = await post(`/api/rounds/${ROUND_ID}/draw`, { ball });
+      if (!data) { button.disabled = false; }
+    });
   });
 
   closeButton.addEventListener("click", async () => {
@@ -138,12 +252,14 @@
     }
   });
 
-  autoDraw.addEventListener("change", () => {
-    clearInterval(autoTimer);
-    if (!autoDraw.checked) { return; }
-    const seconds = Math.min(30, Math.max(2, Number(autoSeconds.value) || 6));
-    autoTimer = setInterval(() => drawButton.click(), seconds * 1000);
-  });
+  if (autoDraw) {
+    autoDraw.addEventListener("change", () => {
+      clearInterval(autoTimer);
+      if (!autoDraw.checked) { return; }
+      const seconds = Math.min(30, Math.max(2, Number(autoSeconds.value) || 6));
+      autoTimer = setInterval(() => drawButton.click(), seconds * 1000);
+    });
+  }
 
   const scheme = location.protocol === "https:" ? "wss:" : "ws:";
   const socket = new WebSocket(`${scheme}//${location.host}/api/rounds/${ROUND_ID}/events`);
@@ -154,9 +270,9 @@
       applySnapshot(payload);
     } else if (payload.event === "ball_drawn") {
       markBall(payload.ball);
-      lastCallEl.textContent = payload.call;
-      drawCountEl.textContent = payload.sequence_no;
-      remainingEl.textContent = payload.remaining;
+      if (lastCallEl) { lastCallEl.textContent = payload.call; }
+      if (drawCountEl) { drawCountEl.textContent = payload.sequence_no; }
+      if (remainingEl) { remainingEl.textContent = payload.remaining; }
     } else if (payload.event === "round_started") {
       setRoundStatus(payload.status);
     } else if (payload.event === "round_won") {
@@ -164,6 +280,9 @@
       winnerEl.hidden = false;
       winnerEl.textContent =
         `BINGO! ${payload.player_name} - ${payload.card_serial} on ball ${payload.draw_count}`;
+    } else if (payload.event === "bingo_announced") {
+      showAnnouncement(payload);
+      setStatus(`${payload.player_name} called BINGO. Check their card below.`);
     } else if (payload.event === "round_closed") {
       setRoundStatus("closed");
     }

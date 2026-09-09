@@ -38,6 +38,31 @@ win check. Ang FREE space ay pre-marked (bit 12 = 1) sa lahat ng card.
 Ang **90-ball** (UK-style, 9x3 grid, 1-line/2-line/full house) ay hindi
 mainstream sa PH bingo halls. Huwag itong idagdag maliban kung hiniling.
 
+## 1a. Sino ang naglalabas ng bola
+
+Hindi laging ang app ang bumubunot. Sa PH, ang pisikal na tambiolo ay bahagi ng
+saya — ang tunog ng bola at ang paghawak ng caller. Kaya tatlong setup ang dapat
+laging sinusuportahan:
+
+| Mode | Sino ang bumubunot | Alam ba ng app ang bola |
+|---|---|---|
+| `auto` | ang app, random | oo |
+| `manual` | pisikal na tambiolo, ipinapasok ng host | oo |
+| `offline` | pisikal na tambiolo, sinasabi nang malakas | hindi |
+
+Prinsipyo sa disenyo: ang `manual` ay dapat dumaan sa **parehong** storage at
+parehong verification gaya ng `auto`. Ang pinapalitan lang ay kung sino ang
+pumipili ng bola. Kapag may hiwalay na code path para sa manual, doon papasok ang
+bug.
+
+Sa `offline`, wala talagang maihahambing ang server. Huwag itong pilitin: huwag
+magdeklara ng panalo, at huwag tanggapin ang marking data mula sa phone bilang
+katotohanan. Ianunsyo lang ang claim at ipakita sa host ang naka-store na card
+para siya ang magtingin. Ang tao ang judge, hindi ang server.
+
+Sa `auto`, huwag payagan ang host na pumili ng bola. Ang makakapili ng bola ay
+makakapili ng mananalo.
+
 ## 2. PH-specific formats
 
 Iba't ibang product ang tinatawag na "bingo" sa Pilipinas. Alamin kung alin ang

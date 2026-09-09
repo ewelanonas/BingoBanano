@@ -22,8 +22,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import templates
 from app.api.security import OPERATOR_COOKIE, get_session_store, require_operator
+from app.db.models import CALLER_AUTO, CALLER_MODES
 from app.db.session import get_db
-from app.domain.draws import TOTAL_BALLS
+from app.domain.draws import BALL_MAX, BALL_MIN, TOTAL_BALLS
 from app.domain.patterns import PATTERNS, pattern_cell_groups
 from app.domain.rng import system_randomizer
 from app.services import audit, rounds
@@ -41,12 +42,20 @@ def round_topic(round_id: str) -> str:
 class CreateRoundRequest(BaseModel):
     pattern: str = "any_line"
     label: str = Field(default="", max_length=64)
+    caller_mode: str = CALLER_AUTO
+
+
+class DrawRequest(BaseModel):
+    # Kailangan sa manual mode: ang bolang lumabas sa pisikal na tambiolo.
+    # Dapat walang laman sa auto mode.
+    ball: int | None = Field(default=None, ge=BALL_MIN, le=BALL_MAX)
 
 
 class RoundResponse(BaseModel):
     id: str
     join_code: str
     pattern: str
+    caller_mode: str
     status: str
     label: str
     drawn: list[int]
@@ -93,7 +102,12 @@ async def create_round(
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> RoundResponse:
     try:
-        game = await rounds.create_round(db, pattern=payload.pattern, label=payload.label)
+        game = await rounds.create_round(
+            db,
+            pattern=payload.pattern,
+            label=payload.label,
+            caller_mode=payload.caller_mode,
+        )
     except rounds.RoundError as exc:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)
@@ -103,7 +117,7 @@ async def create_round(
         db,
         event="round.created",
         outcome=audit.OUTCOME_OK,
-        detail={"round": game.id, "pattern": game.pattern},
+        detail={"round": game.id, "pattern": game.pattern, "caller_mode": game.caller_mode},
     )
     await db.commit()
     return await _summary(db, game.id)
@@ -161,6 +175,7 @@ async def start_round(
 async def draw_ball(
     round_id: str,
     db: Annotated[AsyncSession, Depends(get_db)],
+    payload: DrawRequest | None = None,
 ) -> DrawResponse:
     game = await rounds.get_round(db, round_id)
     if game is None:
@@ -168,7 +183,12 @@ async def draw_ball(
             status_code=status.HTTP_404_NOT_FOUND, detail="That round does not exist."
         )
     try:
-        result = await rounds.draw_next(db, game, system_randomizer())
+        result = await rounds.draw_next(
+            db,
+            game,
+            system_randomizer(),
+            ball=payload.ball if payload else None,
+        )
     except rounds.RoundError as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
 
@@ -274,5 +294,6 @@ async def caller_screen(
         "pattern_groups": pattern_cell_groups(game.pattern),
         "total_balls": TOTAL_BALLS,
         "patterns": sorted(PATTERNS),
+        "caller_modes": CALLER_MODES,
     }
     return templates.TemplateResponse(request, "caller.html", context)

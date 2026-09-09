@@ -14,6 +14,11 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import (
+    CALLER_AUTO,
+    CALLER_MANUAL,
+    CALLER_MODES,
+    CALLER_OFFLINE,
+    CLAIM_ANNOUNCED,
     CLAIM_LATE,
     CLAIM_PATTERN_INCOMPLETE,
     CLAIM_ROUND_NOT_DRAWING,
@@ -28,7 +33,13 @@ from app.db.models import (
     GameRound,
     Player,
 )
-from app.domain.draws import TOTAL_BALLS, PoolExhaustedError, format_call, pick_next
+from app.domain.draws import (
+    TOTAL_BALLS,
+    PoolExhaustedError,
+    format_call,
+    pick_next,
+    validate_ball,
+)
 from app.domain.patterns import PATTERNS, is_win, marked_mask, missing_count
 from app.domain.rng import Randomizer, new_join_code
 from app.services.identity import utcnow
@@ -64,14 +75,18 @@ async def create_round(
     *,
     pattern: str,
     label: str = "",
+    caller_mode: str = CALLER_AUTO,
 ) -> GameRound:
     if pattern not in PATTERNS:
         raise RoundError(f"Unknown pattern: {pattern}")
+    if caller_mode not in CALLER_MODES:
+        raise RoundError(f"Unknown caller mode: {caller_mode}")
 
     for _ in range(_MAX_JOIN_CODE_ATTEMPTS):
         game = GameRound(
             join_code=new_join_code(),
             pattern=pattern,
+            caller_mode=caller_mode,
             status=ROUND_OPEN,
             label=label,
             created_at=utcnow(),
@@ -141,23 +156,49 @@ async def close_round(db: AsyncSession, game: GameRound) -> GameRound:
     return game
 
 
-async def draw_next(db: AsyncSession, game: GameRound, rng: Randomizer) -> DrawResult:
-    """Ilabas ang susunod na bola.
+async def draw_next(
+    db: AsyncSession,
+    game: GameRound,
+    rng: Randomizer,
+    *,
+    ball: int | None = None,
+) -> DrawResult:
+    """Itala ang susunod na bola.
+
+    Kapag `ball` ay `None`, ang RNG ang pumipili — iyon ang `auto` mode. Kapag
+    may `ball`, iyon ang ipinasok ng host mula sa pisikal na tambiolo, at
+    `manual` mode iyon. Pareho ang lahat ng iba: parehong table, parehong
+    constraint, parehong verification.
 
     Ang unique constraint sa `(round_id, sequence_no)` ang gumagawa nitong safe
     kahit dalawang pindot ang dumating nang sabay: ang pangalawa ay babagsak sa
     IntegrityError at magbabasa ng bagong state bago mag-retry, kaya walang
     dalawang bola na nakukuha ang parehong posisyon.
     """
+    if game.caller_mode == CALLER_OFFLINE:
+        raise RoundError("This round is not tracking numbers, so nothing can be drawn.")
     if game.status != ROUND_DRAWING:
         raise RoundError(f"The round is {game.status}, so drawing is not allowed.")
+    if game.caller_mode == CALLER_AUTO and ball is not None:
+        raise RoundError("This round draws its own numbers, so no ball may be supplied.")
+    if game.caller_mode == CALLER_MANUAL and ball is None:
+        raise RoundError("This round needs the ball that came out of your machine.")
+
+    if ball is not None:
+        validate_ball(ball)
 
     for _ in range(_MAX_DRAW_ATTEMPTS):
         drawn = await drawn_balls(db, game.id)
-        try:
-            ball = pick_next(drawn, rng)
-        except PoolExhaustedError as exc:
-            raise RoundError("All 75 balls have already been drawn.") from exc
+
+        if ball is None:
+            try:
+                chosen = pick_next(drawn, rng)
+            except PoolExhaustedError as exc:
+                raise RoundError("All 75 balls have already been drawn.") from exc
+        else:
+            if ball in drawn:
+                raise RoundError(f"{format_call(ball)} has already come out.")
+            chosen = ball
 
         sequence_no = len(drawn) + 1
         savepoint = await db.begin_nested()
@@ -165,7 +206,7 @@ async def draw_next(db: AsyncSession, game: GameRound, rng: Randomizer) -> DrawR
             Draw(
                 round_id=game.id,
                 sequence_no=sequence_no,
-                ball=ball,
+                ball=chosen,
                 drawn_at=utcnow(),
             )
         )
@@ -177,8 +218,8 @@ async def draw_next(db: AsyncSession, game: GameRound, rng: Randomizer) -> DrawR
 
         await db.commit()
         return DrawResult(
-            ball=ball,
-            call=format_call(ball),
+            ball=chosen,
+            call=format_call(chosen),
             sequence_no=sequence_no,
             remaining=TOTAL_BALLS - sequence_no,
         )
@@ -211,6 +252,22 @@ async def verify_claim(
     drawn = await drawn_balls(db, game.id)
     draw_count = len(drawn)
     now = utcnow()
+
+    if game.caller_mode == CALLER_OFFLINE:
+        # Walang draw table na maihahambing, kaya walang maidedeklara ang server.
+        # Inaanunsyo lang ito at ang host ang titingin sa card gamit ang mga
+        # numerong lumabas sa pisikal na tambiolo.
+        return await _record_claim(
+            db,
+            game=game,
+            player=player,
+            card=cards[0],
+            verified=False,
+            reason=CLAIM_ANNOUNCED,
+            missing=0,
+            draw_count=draw_count,
+            at=now,
+        )
 
     if game.status not in (ROUND_DRAWING, ROUND_WON):
         return await _record_claim(
@@ -351,6 +408,7 @@ async def round_summary(db: AsyncSession, game: GameRound) -> dict[str, object]:
         "id": game.id,
         "join_code": game.join_code,
         "pattern": game.pattern,
+        "caller_mode": game.caller_mode,
         "status": game.status,
         "label": game.label,
         "drawn": drawn,

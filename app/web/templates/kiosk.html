@@ -30,8 +30,28 @@
       <label for="label">Round name</label>
       <input id="label" name="label" type="text" maxlength="64" placeholder="Living room game">
     </div>
+    <div class="field">
+      <label for="caller_mode">Who calls the numbers</label>
+      <select id="caller_mode" name="caller_mode">
+        <option value="auto" selected>The app draws them</option>
+        <option value="manual">My own machine, I type each number in</option>
+        <option value="offline">My own machine, cards only</option>
+      </select>
+    </div>
     <button type="submit" class="btn primary">Create round</button>
   </form>
+
+  <dl class="mode-help">
+    <dt>The app draws them</dt>
+    <dd>Press a button or let it auto-draw. Cards mark themselves and BINGO is
+      checked for you.</dd>
+    <dt>My own machine, I type each number in</dt>
+    <dd>Spin your real tambiolo, then click that number on the caller board.
+      Cards still mark themselves and BINGO is still checked for you.</dd>
+    <dt>My own machine, cards only</dt>
+    <dd>The app just hands out cards. Guests tap their own numbers freely, and a
+      BINGO shows you their card so you can check it yourself.</dd>
+  </dl>
 
   <p class="hint">QR base URL: <code>{{ public_base_url }}</code></p>
   <p id="status" class="status" role="status" aria-live="polite"></p>
@@ -150,6 +170,7 @@
       body: JSON.stringify({
         pattern: document.getElementById("pattern").value,
         label: document.getElementById("label").value,
+        caller_mode: document.getElementById("caller_mode").value,
       }),
     });
     if (!response.ok) {

@@ -16,7 +16,8 @@ Guests only enter a nickname. No accounts, no sign-up, no app to install.
 - **Card generation** — 75-ball, 5x5 grid, FREE center, generated server-side
 - **19 patterns** — any line, rows, columns, diagonals, four corners, postage
   stamp, letter X, cross, kite, blackout
-- **Live draw engine** — manual or auto-draw, no ball is ever drawn twice
+- **Three ways to call numbers** — let the app draw them, spin your own machine
+  and type each number in, or use the app purely as a card dispenser
 - **Caller screen** — large `B-7` display and a 1-to-75 board
 - **Player board** — tap your own numbers or let them mark themselves, plus a
   "numbers needed" counter and a BINGO button
@@ -118,7 +119,26 @@ HttpOnly cookie, so it never becomes visible to JavaScript on the page.
 ### 3. Create a round
 
 In the host lobby, pick a pattern and name the round. For a first game, try
-`any_line` — it finishes fastest. Press **Create round** and a join code appears.
+`any_line` — it finishes fastest.
+
+Then choose who calls the numbers:
+
+| Mode | What you do | What the app does |
+|---|---|---|
+| **The app draws them** | Press a button, or let it auto-draw | Draws randomly, marks cards, checks BINGO |
+| **My own machine, I type each number in** | Spin your real tambiolo, click that number on the caller board | Marks cards, checks BINGO |
+| **My own machine, cards only** | Spin and call out loud | Hands out cards; guests mark freely; a BINGO shows you their card to check |
+
+The middle option is worth knowing about. You keep the fun of a physical
+tambiolo, and because the app still knows which numbers came out, cards mark
+themselves and BINGO is still verified for you. One click per ball is all it
+costs.
+
+Pick the last option if you do not want to touch the laptop during the game at
+all. The app becomes a card dispenser, guests tap their own numbers, and you
+verify a BINGO by eye against the card the caller screen shows you.
+
+Press **Create round** and a join code appears.
 
 ### 4. Let guests join
 
@@ -141,8 +161,11 @@ Once everyone has joined, press **Open caller screen**. From there:
 
 - **Start round** — this closes joining, so every card in the round sees the same
   number of balls
-- **Draw next ball** — one ball per press
+- **Draw next ball** — one ball per press, in app-draws mode
 - **Auto-draw** — set it to 6 seconds and let it run itself
+- **The 1-to-75 board** — in "I type each number in" mode this is clickable. Spin
+  your machine, click the number that came out, and it greys out so you cannot
+  enter it twice
 
 Cards mark themselves on each guest's phone. When the "Needed" counter reaches 0,
 the BINGO button lights up. They press it and the server decides.
@@ -152,6 +175,9 @@ automatically** and tap each number themselves. Tapping a number that has not
 been called yet is refused with a nudge, so nobody marks ahead and then wonders
 why their BINGO was rejected. Cells that were called but not yet dabbed are
 outlined, so it is easy to catch up.
+
+In cards-only mode there is nothing to check a tap against, so guests can mark
+anything freely and the refusal does not apply.
 
 If two players complete the pattern on the same ball, both win — co-winners, the
 same way a real bingo hall handles it.
@@ -400,7 +426,7 @@ app/
   services/    # pairing, rounds, issuance, audit, events
   api/         # HTTP and WebSocket routes
   web/         # Jinja2 templates and CSS
-tests/         # 87 tests
+tests/         # 100 tests
 scripts/       # setup-dev.ps1, start-tunnel.ps1
 ```
 
@@ -434,6 +460,16 @@ claim is rejected.
 **Joining closes when drawing starts.** If people could join mid-game, cards
 would have seen different numbers of balls and the game would not be fair.
 
+**A host-entered number is stored the same way a randomly drawn one is.** Manual
+mode changes only who picks the ball; it goes into the same table under the same
+unique constraints. So marking, win checking, co-winners and the live board all
+work without a second code path. Cards-only mode is the one case with no numbers
+to check against, and there the server refuses to declare a winner and hands the
+decision to the host instead of guessing.
+
+**In app-draws mode the host cannot choose a ball.** Supplying one is rejected,
+because a host who could pick the numbers could pick the winner.
+
 **Only a nickname is stored about a player.** No birth date, no email, no ID. A
 player's live board is reachable through an unguessable capability URL rather than
 a login.
@@ -447,7 +483,7 @@ cannot use, so that falls back to `BINGO_PUBLIC_BASE_URL`.
 ## Development
 
 ```powershell
-.\.venv\Scripts\python.exe -m pytest -q          # 87 tests
+.\.venv\Scripts\python.exe -m pytest -q          # 100 tests
 .\.venv\Scripts\python.exe -m ruff check .
 .\.venv\Scripts\python.exe -m ruff format .
 .\.venv\Scripts\python.exe -m mypy               # strict on app/domain

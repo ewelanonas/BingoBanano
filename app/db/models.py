@@ -40,6 +40,16 @@ CLAIM_VALID = "valid"
 CLAIM_PATTERN_INCOMPLETE = "pattern_incomplete"
 CLAIM_ROUND_NOT_DRAWING = "round_not_drawing"
 CLAIM_LATE = "late"
+CLAIM_ANNOUNCED = "announced"
+
+# Sino ang naglalabas ng bola.
+#   auto    - ang app ang bumubunot nang random
+#   manual  - may pisikal na tambiolo, at ipinapasok ng host ang bawat bola
+#   offline - wala talagang binibilang ang app; card dispenser lang ito
+CALLER_AUTO = "auto"
+CALLER_MANUAL = "manual"
+CALLER_OFFLINE = "offline"
+CALLER_MODES = (CALLER_AUTO, CALLER_MANUAL, CALLER_OFFLINE)
 
 
 def _new_id() -> str:
@@ -89,6 +99,7 @@ class GameRound(Base):
     id: Mapped[str] = mapped_column(String(32), primary_key=True, default=_new_id)
     join_code: Mapped[str] = mapped_column(String(12), unique=True, index=True)
     pattern: Mapped[str] = mapped_column(String(32))
+    caller_mode: Mapped[str] = mapped_column(String(16), default=CALLER_AUTO)
     status: Mapped[str] = mapped_column(String(16), default=ROUND_OPEN, index=True)
     label: Mapped[str] = mapped_column(String(64), default="")
     created_at: Mapped[datetime] = mapped_column(UtcDateTime())
