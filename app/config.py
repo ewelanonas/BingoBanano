@@ -46,6 +46,10 @@ class Settings(BaseSettings):
     # Masikip sadya. Isang beses lang naman pumapasok ang host, at kapag naka-
     # tunnel ang server ay abot ito ng internet — dito papasok ang brute force.
     login_rate_limit_per_minute: int = Field(default=10, ge=1, le=120)
+    # Ang pag-decode ng litrato ay ang pinakamabigat na trabaho sa app na kayang
+    # simulan ng isang request. Dalawang file lang naman ang ina-upload, kaya
+    # sapat na ang 12 kada minuto para sa pagpapalit-palit ng crop.
+    photo_upload_rate_limit_per_minute: int = Field(default=12, ge=1, le=120)
 
     def require_secrets(self) -> None:
         if len(self.operator_api_key) < 32:

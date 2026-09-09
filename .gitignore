@@ -23,3 +23,10 @@ __pycache__/
 *.egg-info/
 dist/
 build/
+
+# Litrato ng party. Ina-upload ng host sa /operator/photos, at hindi ito
+# nagagalaw kapag nag-git pull. Litrato ito ng bata sa loob ng bahay — hindi
+# dapat mapunta sa public repo, kaya kahit ang folder ay tinatakpan maliban sa
+# README.
+app/web/static/img/*
+!app/web/static/img/README.md

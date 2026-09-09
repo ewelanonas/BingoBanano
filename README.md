@@ -37,6 +37,8 @@ photos on the cards come from his party. Happy 1st birthday, Eli.
   calls, including the rejected ones
 - **Dinosaur island theme** — jungle colours, a cartoon island along the bottom
   of every page, and a BINGO popup you can put your own photo in
+- **Photo upload** — put your own two party photos in from the phone they are
+  already on, cropped and stripped of camera metadata on the way in
 - **Rounds survive navigation** — opening the caller screen and going back to the
   lobby no longer looks like it wiped your round
 
@@ -428,31 +430,51 @@ server with the same proxy flags.
 
 ## Adding your own party photos
 
-Two photos are wired into the theme, and both are optional. Save them here:
+Two photos are wired into the theme, and both are optional. Sign in as the host
+and press **Photos** in the lobby header, or go straight to `/operator/photos`.
 
-| File | Where it shows up |
+The page works from a phone, which is where the photos usually are. Pick a file,
+press **Upload**, and press **Preview popup** to see the result. No file
+copying, no server restart.
+
+| Slot | Where it shows up |
 |---|---|
-| `app/web/static/img/photo1.png` | Behind every called number on a card, and in the popup |
-| `app/web/static/img/photo2.png` | In the popup |
+| Photo 1 | Behind every called number on a card, and in the popup |
+| Photo 2 | In the popup |
 
 The popup picks one of the two at random each time somebody wins, so guests see
-both over a party. Called numbers always use `photo1.png`, because a grid of 24
-cells flipping between two faces is noisy and the number has to stay readable on
-top of it.
+both over a party. Called numbers always use photo 1, because a grid of 24 cells
+flipping between two faces is noisy and the number has to stay readable on top of
+it.
 
-If a file is missing the app falls back to plain colours and a gradient, so
-nothing breaks at the party if you skip this. Square crops work best — the popup
-masks them into a circle. Keep each one under roughly 200 KB, since guests load
-them on mobile data. For `photo1.png`, avoid busy detail in the middle: a number
-sits on top of it, with a dark shadow so it stays readable either way.
+If a slot is empty the app falls back to plain colours and a gradient, so nothing
+breaks at the party if you skip this. **Remove** puts a slot back to that
+fallback.
 
-**Restart the server after adding the files**, then hard-refresh the browser
-(`Ctrl`+`F5`). Phones cache images aggressively, so a guest who loaded the page
-before you added them may need to reload too.
+Hand it a straight-off-the-camera shot. The server decodes the file, applies the
+rotation the camera recorded, crops it square slightly above centre so a face
+does not get cut off, shrinks it to 640px, and re-saves it as JPEG at around
+60-90 KB. That last number matters: every guest loads these on mobile data.
 
-To check the popup without waiting for someone to win, press **Preview popup** on
-the caller screen. It is local to that page: nothing is sent to the server and no
-round is affected.
+Three things fall out of re-encoding rather than storing what was sent:
+
+- Camera metadata is dropped, GPS location included. These are photos of a child
+  taken inside a house, on a page that is reachable from the internet whenever
+  the tunnel is up.
+- A file that is not really an image cannot be saved, whatever `Content-Type` the
+  browser claims. The decode decides, not the label.
+- A decompression bomb is refused from its header, before any pixels are
+  allocated.
+
+Uploads are host-only, CSRF-checked, and rate limited. The saved files are in
+`.gitignore`: they never land in the repo, and `git pull` leaves them alone.
+
+Square-ish framing looks best, since both photos are masked into a circle. For
+photo 1, avoid busy detail in the middle: a number sits on top of it, with a dark
+shadow so it stays readable either way.
+
+**Preview popup** is on the caller screen too. It is local to the page — nothing
+is sent to the server and no round is affected.
 
 The whole look lives in `app/web/static/theme.css`. Deleting its `<link>` from
 `app/web/templates/base.html` returns the app to the plain styling and changes

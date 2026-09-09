@@ -21,12 +21,12 @@
   // `Math.random` ang gamit dito at hindi crypto RNG. Palamuti lang ito: walang
   // card, walang bola, at walang panalong nakasalalay dito. Ang mga iyon ay may
   // sariling RNG sa server na sinasadyang naka-audit.
-  const PHOTOS = ["/static/img/photo1.png", "/static/img/photo2.png"];
+  const PHOTOS = ["/static/img/photo1.jpg", "/static/img/photo2.jpg"];
 
   function pickPhoto() {
     const chosen = PHOTOS[Math.floor(Math.random() * PHOTOS.length)];
     // Custom property, hindi `background-image` nang tuwiran: sa CSS nakalagay
-    // ang gradient sa ilalim, kaya kung wala pa ang PNG ay may makikita pa rin.
+    // ang gradient sa ilalim, kaya kung wala pa ang litrato ay may makikita pa rin.
     photoEl.style.setProperty("--celebration-photo", `url("${chosen}")`);
   }
 

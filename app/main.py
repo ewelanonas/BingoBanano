@@ -10,7 +10,7 @@ from fastapi import FastAPI, Request, status
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from app.api import history, operator, pairing, play, rounds
+from app.api import history, operator, pairing, photos, play, rounds
 from app.api.deps import STATIC_DIR
 from app.config import MissingSecretError, get_settings
 from app.db.session import create_schema, dispose_engine
@@ -46,6 +46,7 @@ def create_app() -> FastAPI:
     app.include_router(pairing.router)
     app.include_router(play.router)
     app.include_router(history.router)
+    app.include_router(photos.router)
 
     @app.exception_handler(MissingSecretError)
     async def _missing_secret(request: Request, exc: MissingSecretError) -> JSONResponse:

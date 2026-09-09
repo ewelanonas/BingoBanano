@@ -287,6 +287,44 @@ table.grid td.free.marked { background: var(--free); color: var(--ink); }
 .joined { margin: 1.2rem 0 0; padding-left: 1.1rem; color: var(--muted); }
 .joined li { margin: 0.2rem 0; }
 
+/* --- Party photo upload --- */
+
+.photo-row { display: flex; flex-wrap: wrap; gap: 1.2rem; align-items: start; }
+.photo-controls { display: flex; flex-wrap: wrap; gap: 0.8rem; align-items: end; }
+
+.photo-preview {
+  width: 140px;
+  height: 140px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  border: 2px dashed var(--line);
+  overflow: hidden;
+}
+
+/* Bilog dito gaya ng sa popup, para ang nakikita ng host ay siya ring lalabas
+   sa harap ng mga bisita. */
+.photo-thumb { width: 100%; height: 100%; border-radius: 50%; object-fit: cover; }
+
+.photo-empty {
+  margin: 0;
+  padding: 0 0.6rem;
+  text-align: center;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.photo-meta { margin: 0; font-size: 0.85rem; }
+
+input[type="file"] {
+  padding: 0.55rem;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel);
+  color: inherit;
+  max-width: 17rem;
+}
+
 /* --- Tap to dab --- */
 
 .daub-toggle { margin: 0.2rem 0 1rem; align-items: center; }

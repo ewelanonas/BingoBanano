@@ -38,7 +38,7 @@ def test_photos_are_optional() -> None:
     css = (STATIC / "theme.css").read_text(encoding="utf-8")
 
     called = css.split("td.marked {", 1)[1].split("}", 1)[0]
-    assert 'background-image: url("/static/img/photo1.png")' in called
+    assert 'background-image: url("/static/img/photo1.jpg")' in called
     # Ang fallback na kulay ang dahilan kung bakit maayos pa rin kapag wala ang file.
     assert "background-color: var(--accent)" in called
 
@@ -50,8 +50,8 @@ def test_photos_are_optional() -> None:
 
 def test_popup_rotates_between_both_photos() -> None:
     js = (STATIC / "celebrate.js").read_text(encoding="utf-8")
-    assert "/static/img/photo1.png" in js
-    assert "/static/img/photo2.png" in js
+    assert "/static/img/photo1.jpg" in js
+    assert "/static/img/photo2.jpg" in js
     # Bagong pili kada popup, hindi isang beses lang sa pag-load ng page.
     assert "pickPhoto();" in js.split("window.showCelebration", 1)[1]
 
@@ -60,7 +60,9 @@ def test_no_stale_photo_filenames_remain() -> None:
     """Ang dating pangalan ng file ay hindi na dapat sinasangguni ng kahit alin."""
     css = (STATIC / "theme.css").read_text(encoding="utf-8")
     js = (STATIC / "celebrate.js").read_text(encoding="utf-8")
-    for old in ("called.png", "bingo.png"):
+    # Ang `.png` ay naging `.jpg` nang dumaan na ang litrato sa upload page:
+    # ini-re-encode ito bilang JPEG, kaya mali na ang lumang extension.
+    for old in ("called.png", "bingo.png", "photo1.png", "photo2.png"):
         assert old not in css
         assert old not in js
 

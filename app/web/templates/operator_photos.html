@@ -1,0 +1,172 @@
+{% extends "base.html" %}
+{% block title %}Party photos - BingoBanano{% endblock %}
+
+{% set slot_help = {
+  "photo1": "Behind every called number on a guest's card, and in the BINGO popup.",
+  "photo2": "In the BINGO popup only.",
+} %}
+
+{% block header_extra %}
+<span class="header-actions">
+  <a class="btn ghost" href="/kiosk">Host lobby</a>
+  <a class="btn ghost" href="/history">History</a>
+  <form method="post" action="/operator/logout" class="inline">
+    <button type="submit" class="btn ghost">Sign out</button>
+  </form>
+</span>
+{% endblock %}
+
+{% block content %}
+<section class="panel">
+  <h1>Party photos</h1>
+  <p class="muted">
+    Upload two photos straight from your phone. The BINGO popup picks one of
+    them at random every time somebody wins, so guests see both over the course
+    of the party. Both are optional: without them the app falls back to plain
+    colours and nothing breaks.
+  </p>
+  <p class="hint">
+    Each photo is cropped square, shrunk to {{ output_edge }}px, and re-saved on
+    the server, so a straight-off-the-camera shot is fine. Up to {{ max_mb }} MB.
+    Location data and the rest of the camera info are stripped in the process.
+  </p>
+  <p id="status" class="status" role="status" aria-live="polite"></p>
+</section>
+
+{% for slot, info in photos %}
+<section class="panel photo-slot" data-slot="{{ slot }}">
+  <h2>{{ slot.replace("photo", "Photo ") }}</h2>
+  <p class="muted">{{ slot_help[slot] }}</p>
+
+  <div class="photo-row">
+    <div class="photo-preview">
+      {% if info %}
+      <img class="photo-thumb" src="{{ info.url }}?v={{ info.version }}" width="140" height="140"
+           alt="{{ slot }} as it is saved right now">
+      {% else %}
+      <p class="photo-empty">Nothing uploaded yet</p>
+      {% endif %}
+    </div>
+
+    <div class="photo-controls">
+      <div class="field">
+        <label for="file-{{ slot }}">Pick a photo</label>
+        <input id="file-{{ slot }}" type="file" accept="image/*" class="photo-input">
+      </div>
+      <button type="button" class="btn primary photo-upload">Upload</button>
+      <button type="button" class="btn ghost photo-remove" {% if not info %}hidden{% endif %}>
+        Remove
+      </button>
+      <p class="photo-meta muted">
+        {% if info %}Saved, {{ (info.byte_size / 1024) | round | int }} KB{% endif %}
+      </p>
+    </div>
+  </div>
+</section>
+{% endfor %}
+
+<section class="panel">
+  <h2>Check how it looks</h2>
+  <p class="muted">
+    Opens the same popup a guest sees when they win, using whichever photo the
+    random pick lands on. Press it a few times to see both.
+  </p>
+  <button type="button" class="btn primary" id="preview-button">Preview popup</button>
+</section>
+
+{% include "_celebration.html" %}
+{% endblock %}
+
+{% block scripts %}
+<script>
+  const CSRF_TOKEN = {{ csrf_token | tojson }};
+  const statusEl = document.getElementById("status");
+
+  const setStatus = (text) => { statusEl.textContent = text; };
+
+  function slotSection(slot) {
+    return document.querySelector(`.photo-slot[data-slot="${slot}"]`);
+  }
+
+  // Ang naka-upload na ay malamang nasa cache ng browser, kaya kasama ang
+  // version sa URL. Kung wala ito, ang lumang litrato pa rin ang makikita.
+  function showSaved(slot, data) {
+    const section = slotSection(slot);
+    const preview = section.querySelector(".photo-preview");
+    const image = document.createElement("img");
+    image.className = "photo-thumb";
+    image.width = 140;
+    image.height = 140;
+    image.alt = `${slot} as it is saved right now`;
+    image.src = `${data.url}?v=${data.version}`;
+    preview.replaceChildren(image);
+    section.querySelector(".photo-remove").hidden = false;
+    section.querySelector(".photo-meta").textContent =
+      `Saved, ${Math.round(data.byte_size / 1024)} KB`;
+  }
+
+  function showEmpty(slot) {
+    const section = slotSection(slot);
+    const empty = document.createElement("p");
+    empty.className = "photo-empty";
+    empty.textContent = "Nothing uploaded yet";
+    section.querySelector(".photo-preview").replaceChildren(empty);
+    section.querySelector(".photo-remove").hidden = true;
+    section.querySelector(".photo-meta").textContent = "";
+  }
+
+  for (const section of document.querySelectorAll(".photo-slot")) {
+    const slot = section.dataset.slot;
+    const input = section.querySelector(".photo-input");
+    const uploadButton = section.querySelector(".photo-upload");
+    const removeButton = section.querySelector(".photo-remove");
+
+    uploadButton.addEventListener("click", async () => {
+      const file = input.files && input.files[0];
+      if (!file) {
+        setStatus(`Pick a file for ${slot} first.`);
+        return;
+      }
+      const body = new FormData();
+      body.append("photo", file);
+      uploadButton.disabled = true;
+      setStatus(`Uploading ${slot}...`);
+      try {
+        const response = await fetch(`/api/photos/${slot}`, {
+          method: "POST",
+          headers: { "X-CSRF-Token": CSRF_TOKEN },
+          body,
+        });
+        if (!response.ok) {
+          const problem = await response.json().catch(() => ({}));
+          setStatus(problem.detail || `Could not save ${slot}.`);
+          return;
+        }
+        const data = await response.json();
+        showSaved(slot, data);
+        input.value = "";
+        setStatus(`${slot} saved. Press Preview popup to see it.`);
+      } finally {
+        uploadButton.disabled = false;
+      }
+    });
+
+    removeButton.addEventListener("click", async () => {
+      const response = await fetch(`/api/photos/${slot}`, {
+        method: "DELETE",
+        headers: { "X-CSRF-Token": CSRF_TOKEN },
+      });
+      if (!response.ok) {
+        setStatus(`Could not remove ${slot}.`);
+        return;
+      }
+      showEmpty(slot);
+      setStatus(`${slot} removed. The app falls back to plain colours.`);
+    });
+  }
+
+  document.getElementById("preview-button").addEventListener("click", () => {
+    window.showCelebration("Eli", "BINGO!");
+  });
+</script>
+{% endblock %}

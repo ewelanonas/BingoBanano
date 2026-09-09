@@ -139,7 +139,7 @@ table.grid td.free {
    ang hitsura. Kapag naidagdag na ang file, iyon ang tatabing. */
 table.grid td.marked {
   background-color: var(--accent);
-  background-image: url("/static/img/photo1.png");
+  background-image: url("/static/img/photo1.jpg");
   background-size: cover;
   background-position: center;
   color: var(--accent-ink);
@@ -224,15 +224,15 @@ button.board-ball.drawn {
    property ang ginagamit at hindi tuwirang url. Ang nakasulat na `photo1` ay ang
    default kung sakaling hindi tumakbo ang script.
 
-   Nasa ilalim ang gradient, kaya kung wala pa ang PNG ay may lumalabas pa ring
-   maayos na bilog at hindi butas. */
+   Nasa ilalim ang gradient, kaya kung wala pa ang litrato ay may lumalabas pa
+   ring maayos na bilog at hindi butas. */
 .celebration-photo {
   width: min(62vw, 260px);
   aspect-ratio: 1;
   border-radius: 50%;
   border: 6px solid #ffd34d;
   background-image:
-    var(--celebration-photo, url("/static/img/photo1.png")),
+    var(--celebration-photo, url("/static/img/photo1.jpg")),
     radial-gradient(circle, var(--free), var(--accent));
   background-size: cover, cover;
   background-position: center, center;
