@@ -1,0 +1,23 @@
+{#
+  Ang BINGO celebration popup. I-include ito sa loob ng content block ng kahit
+  anong page na kailangang mag-anunsyo ng panalo, at tawagin ang
+  `showCelebration(...)` mula sa script ng page na iyon.
+
+  Ang litrato ay nasa CSS bilang background-image na may gradient sa ilalim,
+  kaya kahit wala pa ang file ay may lumalabas pa ring maayos na burst.
+
+  I-set ang `celebration_word` bago i-include kung iba ang tawag sa panalo. Sa
+  elimination ay walang tumatawag ng BINGO, kaya mali doon ang salitang iyon
+  kahit sa markup na nakatago pa.
+#}
+<div class="celebration" id="celebration" hidden role="alertdialog" aria-modal="true"
+     aria-labelledby="celebration-word" aria-describedby="celebration-name">
+  <div class="celebration-inner">
+    <p class="celebration-word" id="celebration-word">{{ celebration_word | default("BINGO!") }}</p>
+    <div class="celebration-photo" role="img" aria-label="Birthday celebration photo"></div>
+    <p class="celebration-name" id="celebration-name"></p>
+    <p class="celebration-hint">Tap anywhere to close.</p>
+    <button type="button" class="btn" id="celebration-close">Close</button>
+  </div>
+</div>
+<script src="/static/celebrate.js"></script>

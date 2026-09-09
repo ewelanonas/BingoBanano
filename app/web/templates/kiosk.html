@@ -75,6 +75,42 @@
   <div id="warnings" class="warnings"></div>
 </section>
 
+{% if active_rounds %}
+<section class="panel">
+  <h2>Rounds still going</h2>
+  <p class="muted">
+    Leaving the caller screen does not end a round. Pick one up where you left off.
+  </p>
+  <ul class="history-list">
+    {% for round in active_rounds %}
+    <li class="history-row">
+      <div class="history-link resume-row">
+        <span class="history-code">{{ round.join_code }}</span>
+        <span class="history-outcome">
+          {% if round.status == "open" %}Waiting for guests{% else %}Drawing{% endif %}
+        </span>
+        <span class="history-meta">
+          {{ round.game_type }}
+          {%- if round.game_type == "classic" %} &middot; {{ round.pattern.replace("_", " ") }}{% endif %}
+          &middot; {{ round.player_count }} player{{ "s" if round.player_count != 1 else "" }}
+          &middot; {{ round.draw_count }} ball{{ "s" if round.draw_count != 1 else "" }}
+          {%- if round.label %} &middot; {{ round.label }}{% endif %}
+        </span>
+        <span class="resume-actions">
+          {% if round.status == "open" %}
+          <button type="button" class="btn ghost resume-join" data-round="{{ round.id }}"
+                  data-code="{{ round.join_code }}"
+                  data-pattern="{{ round.pattern }}">Add guests</button>
+          {% endif %}
+          <a class="btn primary" href="/caller/{{ round.id }}">Caller screen</a>
+        </span>
+      </div>
+    </li>
+    {% endfor %}
+  </ul>
+</section>
+{% endif %}
+
 <section class="panel" id="round-panel" hidden>
   <h2>Round <span id="join-code" class="join-code"></span></h2>
   <p class="muted">
@@ -223,6 +259,25 @@
     joinedEl.replaceChildren();
     setStatus("Round ready. Generate a QR for your first guest.");
   });
+
+  // Ipagpatuloy ang round na tumatakbo pa. Ang round ay nasa DB, hindi sa page.
+  for (const button of document.querySelectorAll("button.resume-join")) {
+    button.addEventListener("click", () => {
+      round = {
+        id: button.dataset.round,
+        join_code: button.dataset.code,
+        pattern: button.dataset.pattern,
+      };
+      joinCodeEl.textContent = round.join_code;
+      roundPatternEl.textContent = round.pattern.replace(/_/g, " ");
+      callerLink.href = `/caller/${round.id}`;
+      roundPanel.hidden = false;
+      joinedEl.replaceChildren();
+      refreshTally();
+      setStatus(`Back on round ${round.join_code}. Generate a QR for the next guest.`);
+      roundPanel.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+  }
 
   document.getElementById("qr-button").addEventListener("click", async () => {
     setStatus("Generating QR...");

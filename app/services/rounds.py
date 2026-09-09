@@ -127,6 +127,21 @@ async def get_round_by_code(db: AsyncSession, join_code: str) -> GameRound | Non
     return await db.scalar(select(GameRound).where(GameRound.join_code == join_code.upper()))
 
 
+async def active_rounds(db: AsyncSession) -> list[GameRound]:
+    """Ang mga round na tumatakbo pa: bukas sa pagsali o nagbubunot na.
+
+    Kailangan ito ng lobby. Dati ay nasa memory lang ng page ang round, kaya
+    kapag umalis ang host at bumalik ay mukhang nabura ito — nasa DB lang naman
+    pala at hindi na niya mahanap.
+    """
+    result = await db.scalars(
+        select(GameRound)
+        .where(GameRound.status.in_([ROUND_OPEN, ROUND_DRAWING]))
+        .order_by(GameRound.created_at.desc())
+    )
+    return list(result)
+
+
 async def drawn_balls(db: AsyncSession, round_id: str) -> list[int]:
     """Ang sequence ng bola sa pagkakasunod ng paglabas."""
     result = await db.scalars(

@@ -84,11 +84,14 @@
     {% endfor %}
   </div>
 </section>
+
+{% include "_celebration.html" %}
 {% endblock %}
 
 {% block scripts %}
 <script>
   const TOKEN = {{ token | tojson }};
+  const PLAYER_NAME = {{ player_name | tojson }};
   const PATTERN_GROUPS = {{ pattern_groups | tojson }};
   const CARDS = {{ cards | tojson }};
   // Kapag walang binibilang ang app, ang player ang nagmamarka. Kung may
@@ -222,7 +225,9 @@
     });
     const data = await response.json().catch(() => ({}));
     messageEl.textContent = data.message || data.detail || "Could not send the claim.";
-    if (!data.verified) {
+    if (data.verified) {
+      showCelebration(`${PLAYER_NAME}, you got it!`);
+    } else {
       setTimeout(() => { bingoButton.disabled = false; }, 1500);
     }
   });
@@ -263,6 +268,10 @@
     } else if (payload.event === "round_won") {
       messageEl.textContent =
         `${payload.player_name} won with ${payload.card_serial} on ball ${payload.draw_count}.`;
+      // Ang nanalo ay nakakita na ng popup mula sa sagot ng claim niya.
+      if (payload.player_name !== PLAYER_NAME) {
+        showCelebration(`${payload.player_name} won!`);
+      }
     }
   });
 </script>

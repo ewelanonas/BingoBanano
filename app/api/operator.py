@@ -8,8 +8,9 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import APIRouter, Form, HTTPException, Request, Response, status
+from fastapi import APIRouter, Depends, Form, HTTPException, Request, Response, status
 from fastapi.responses import HTMLResponse, RedirectResponse
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import templates
 from app.api.security import (
@@ -20,7 +21,9 @@ from app.api.security import (
     verify_api_key,
 )
 from app.config import get_settings
+from app.db.session import get_db
 from app.domain.patterns import PATTERNS
+from app.services import rounds
 
 router = APIRouter()
 
@@ -87,7 +90,10 @@ async def operator_logout(request: Request) -> RedirectResponse:
 
 
 @router.get("/kiosk", response_class=HTMLResponse, include_in_schema=False)
-async def kiosk(request: Request) -> Response:
+async def kiosk(
+    request: Request,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> Response:
     session = get_session_store().get(request.cookies.get(OPERATOR_COOKIE))
     if session is None:
         return RedirectResponse("/operator", status_code=status.HTTP_303_SEE_OTHER)
@@ -101,6 +107,8 @@ async def kiosk(request: Request) -> Response:
             detail=str(exc),
         ) from exc
 
+    active = [await rounds.round_summary(db, game) for game in await rounds.active_rounds(db)]
+
     return templates.TemplateResponse(
         request,
         "kiosk.html",
@@ -110,5 +118,6 @@ async def kiosk(request: Request) -> Response:
             "default_card_count": settings.default_card_count,
             "max_card_count": settings.max_card_count,
             "public_base_url": settings.public_base_url,
+            "active_rounds": active,
         },
     )

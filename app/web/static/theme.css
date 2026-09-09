@@ -1,0 +1,275 @@
+/* Dinosaur island theme para sa BingoBanano.
+ *
+ * Nakasunod ito sa app.css at pinapalitan ang mga custom property. Ang layout
+ * ay hindi ginagalaw — kulay, background, at ang mga dagdag na palamuti lang.
+ *
+ * Bakit hiwalay na file: kapag ayaw mo na ng tema, isang link tag lang ang
+ * aalisin sa base.html at babalik ang plain na hitsura.
+ */
+
+:root {
+  --bg: #eef7e6;
+  --panel: #fffdf6;
+  --ink: #1f3324;
+  --muted: #5c6f5f;
+  --line: #cfe0c4;
+  --accent: #2f7d4f;        /* jungle green */
+  --accent-ink: #ffffff;
+  --alert-bg: #fdefd2;
+  --alert-ink: #7a4a12;
+  --free: #e3f2d8;
+  --sand: #e6d3a3;
+  --volcano: #e8724a;
+  --sky: #8fd4e8;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #16241b;
+    --panel: #1e2f23;
+    --ink: #e8f3e6;
+    --muted: #9db3a2;
+    --line: #33513c;
+    --accent: #55b97a;
+    --accent-ink: #0d1a11;
+    --alert-bg: #40301a;
+    --alert-ink: #f3d5a3;
+    --free: #24382a;
+    --sand: #6a5c3c;
+    --volcano: #f08a63;
+    --sky: #234c5c;
+  }
+}
+
+/* --- Island background ------------------------------------------------- */
+
+body {
+  background-color: var(--bg);
+  /* Malalaking bilog na parang dahon sa likod, magaan lang para nananatiling
+     mababasa ang teksto sa ilalim ng araw. */
+  background-image:
+    radial-gradient(circle at 12% 8%, rgba(47, 125, 79, 0.10) 0 22%, transparent 23%),
+    radial-gradient(circle at 88% 4%, rgba(63, 169, 201, 0.12) 0 18%, transparent 19%),
+    radial-gradient(circle at 78% 42%, rgba(232, 114, 74, 0.07) 0 16%, transparent 17%);
+  background-attachment: fixed;
+}
+
+/* Ang isla ay nasa ilalim ng page, hindi humaharang sa content. */
+body::after {
+  content: "";
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: min(26vh, 190px);
+  background: url("/static/dino.svg") bottom center / cover no-repeat;
+  opacity: 0.5;
+  pointer-events: none;
+  z-index: -1;
+}
+
+@media (prefers-color-scheme: dark) {
+  body::after { opacity: 0.3; }
+}
+
+main { position: relative; }
+
+/* --- Header at panel -------------------------------------------------- */
+
+.site-header {
+  background: linear-gradient(180deg, var(--panel), var(--free));
+  border-bottom: 2px solid var(--line);
+}
+
+.brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  font-size: 1.05rem;
+}
+
+/* Maliit na dino sa tabi ng pangalan. */
+.brand::before {
+  content: "";
+  width: 1.6rem;
+  height: 1.6rem;
+  flex: none;
+  background: url("/static/dino.svg") 22% 74% / 420% no-repeat;
+  border-radius: 50%;
+  border: 2px solid var(--accent);
+}
+
+.panel {
+  border-width: 2px;
+  border-radius: 18px;
+  box-shadow: 0 2px 0 var(--line);
+}
+
+h1, h2 { letter-spacing: -0.01em; }
+
+.site-footer {
+  background: linear-gradient(180deg, var(--free), var(--panel));
+  border-top: 2px solid var(--line);
+}
+
+/* --- Cards ------------------------------------------------------------ */
+
+.bingo-card {
+  border-width: 2px;
+  border-radius: 16px;
+  background:
+    linear-gradient(180deg, var(--panel), var(--free));
+}
+
+table.grid th {
+  background: linear-gradient(180deg, var(--accent), #24603c);
+  letter-spacing: 0.06em;
+}
+
+table.grid th, table.grid td { border-color: var(--line); }
+
+table.grid td.free {
+  background: var(--sand);
+  color: var(--ink);
+}
+
+/* --- Ang litrato sa natawag na numero ---------------------------------- */
+
+/* Ang kulay ang nasa ilalim, kaya kung wala pa ang litrato ay maayos pa rin
+   ang hitsura. Kapag naidagdag na ang file, iyon ang tatabing. */
+table.grid td.marked {
+  background-color: var(--accent);
+  background-image: url("/static/img/called.png");
+  background-size: cover;
+  background-position: center;
+  color: var(--accent-ink);
+  /* Nananatiling mababasa ang numero kahit may litrato sa likod. */
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.85), 0 0 6px rgba(0, 0, 0, 0.6);
+}
+
+table.grid td.marked button.dab {
+  color: var(--accent-ink);
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.85), 0 0 6px rgba(0, 0, 0, 0.6);
+}
+
+table.grid td.free.marked {
+  background-image: none;
+  text-shadow: none;
+}
+
+/* --- Big call display ------------------------------------------------- */
+
+.call-strip {
+  background: linear-gradient(135deg, var(--free), var(--panel));
+  border-width: 2px;
+  border-radius: 16px;
+}
+
+.call-big {
+  color: var(--accent);
+  text-shadow: 0 2px 0 var(--line);
+}
+
+/* --- Board ------------------------------------------------------------ */
+
+.board-letter { background: linear-gradient(180deg, var(--accent), #24603c); }
+
+.board-ball.drawn,
+button.board-ball.drawn {
+  background: var(--volcano);
+  border-color: var(--volcano);
+  color: #fff;
+}
+
+/* --- Elimination ------------------------------------------------------ */
+
+.ticket-number, .survival-number { border-color: var(--accent); }
+
+.verdict[data-state="winner"] {
+  background: linear-gradient(135deg, var(--accent), var(--volcano));
+}
+
+/* --- BINGO celebration ------------------------------------------------ */
+
+.celebration {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  gap: 1rem;
+  padding: 1.5rem;
+  background: rgba(15, 32, 21, 0.86);
+  z-index: 50;
+  text-align: center;
+}
+
+.celebration[hidden] { display: none; }
+
+.celebration-inner {
+  display: grid;
+  justify-items: center;
+  gap: 0.8rem;
+  animation: celebrate-in 520ms cubic-bezier(0.2, 1.5, 0.4, 1);
+}
+
+.celebration-word {
+  font-size: clamp(2.6rem, 14vw, 6rem);
+  font-weight: 900;
+  letter-spacing: 0.06em;
+  color: #ffd34d;
+  text-shadow: 0 4px 0 #b8791a, 0 0 24px rgba(255, 211, 77, 0.6);
+}
+
+/* Kung wala pa ang litrato, nananatiling maayos ang burst — ang bilog na
+   gradient ang nasa ilalim. */
+.celebration-photo {
+  width: min(62vw, 260px);
+  aspect-ratio: 1;
+  border-radius: 50%;
+  border: 6px solid #ffd34d;
+  background:
+    url("/static/img/bingo.png") center / cover no-repeat,
+    radial-gradient(circle, var(--free), var(--accent));
+  box-shadow: 0 0 0 10px rgba(255, 211, 77, 0.25), 0 12px 30px rgba(0, 0, 0, 0.5);
+  animation: celebrate-pop 640ms cubic-bezier(0.2, 1.6, 0.35, 1);
+}
+
+.celebration-name {
+  font-size: 1.2rem;
+  font-weight: 700;
+  color: #fffdf6;
+}
+
+.celebration-hint { color: #cfe0c4; font-size: 0.9rem; }
+
+.celebration button {
+  margin-top: 0.4rem;
+  background: #ffd34d;
+  color: #4a3208;
+  border: 0;
+  font-weight: 800;
+}
+
+@keyframes celebrate-in {
+  from { transform: translateY(24px) scale(0.9); opacity: 0; }
+  to { transform: translateY(0) scale(1); opacity: 1; }
+}
+
+@keyframes celebrate-pop {
+  0% { transform: scale(0.4) rotate(-12deg); }
+  60% { transform: scale(1.12) rotate(6deg); }
+  100% { transform: scale(1) rotate(0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .celebration-inner, .celebration-photo { animation: none; }
+}
+
+/* --- Kids-party sizing ------------------------------------------------ */
+
+/* Ang mga bisita ay hawak ang phone nang malayo sa mata habang nakikipag-usap,
+   kaya mas malaki ang cell kaysa sa default. */
+@media (max-width: 480px) {
+  table.grid th, table.grid td { width: 3rem; height: 3rem; }
+  button.dab { min-height: 3rem; font-size: 1.05rem; }
+}

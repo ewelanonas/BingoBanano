@@ -12,9 +12,16 @@ Guests only enter a nickname. No accounts, no sign-up, no app to install.
 > This is a party game, not a gambling platform. No money, no wallet, no
 > payments. See [Not included](#not-included) for what's deliberately missing.
 
+## Why this exists
+
+I built BingoBanano for my son **Eli's 1st birthday**. I wanted a bingo game the
+guests could join by pointing a phone camera at a screen, with no app to install
+and no sign-up, so nobody had to sit out. The dinosaur island theme and the
+photos on the cards come from his party. Happy 1st birthday, Eli.
+
 ## What works
 
-- **QR pairing** — one QR per guest, single-use, expires after 120 seconds
+- **QR pairing** — one QR per guest, single-use, expires after 300 seconds
 - **Two games** — classic pattern bingo, or last-card-standing elimination
 - **Card generation** — 75-ball, 5x5 grid, FREE center, generated server-side
 - **19 patterns** — any line, rows, columns, diagonals, four corners, postage
@@ -28,6 +35,10 @@ Guests only enter a nickname. No accounts, no sign-up, no app to install.
 - **Server-side verification** — no marking data is accepted from the phone
 - **Game history** — every past round with its winner, ball sequence and BINGO
   calls, including the rejected ones
+- **Dinosaur island theme** — jungle colours, a cartoon island along the bottom
+  of every page, and a BINGO popup you can put your own photo in
+- **Rounds survive navigation** — opening the caller screen and going back to the
+  lobby no longer looks like it wiped your round
 
 ## Requirements
 
@@ -185,7 +196,7 @@ the cards there too, and because that copy was a static picture rather than the
 interactive board, guests tapped numbers on it and nothing happened.
 
 One QR per guest. Each is single-use, so press **Generate QR** again for the next
-person. A QR expires after 120 seconds; just generate a new one if it lapses.
+person. A QR expires after 300 seconds; just generate a new one if it lapses.
 
 ### 5. Start drawing
 
@@ -411,6 +422,25 @@ If you would rather not use `cloudflared`, `ngrok http 8000` gives an equivalent
 HTTPS URL; paste it into `.env` as `BINGO_PUBLIC_BASE_URL` yourself and start the
 server with the same proxy flags.
 
+## Adding your own party photos
+
+Two photos are wired into the theme, and both are optional. Save them here:
+
+| File | Where it shows up |
+|---|---|
+| `app/web/static/img/called.png` | Behind every called number on a guest's card |
+| `app/web/static/img/bingo.png` | In the round badge on the BINGO popup |
+
+If a file is missing the app falls back to plain colours, so nothing breaks at
+the party if you skip this. Square crops work best — `bingo.png` is masked into a
+circle. Keep each one under roughly 200 KB, since guests load them on mobile
+data. For `called.png`, avoid busy detail in the middle: a number sits on top of
+it, with a dark shadow so it stays readable either way.
+
+The whole look lives in `app/web/static/theme.css`. Deleting its `<link>` from
+`app/web/templates/base.html` returns the app to the plain styling and changes
+nothing else.
+
 ## Game history
 
 **History** in the lobby header lists every round, newest first, with the outcome
@@ -461,7 +491,7 @@ Everything lives in `.env`, prefixed with `BINGO_`.
 | `BINGO_OPERATOR_API_KEY` | none | Host password. 32 chars minimum, required |
 | `BINGO_PUBLIC_BASE_URL` | `http://127.0.0.1:8000` | Fallback for the QR address, used only when you open the lobby on `localhost` |
 | `BINGO_DATABASE_URL` | SQLite file | Swap for PostgreSQL if you outgrow it |
-| `BINGO_PAIRING_TTL_SECONDS` | `120` | How long a QR stays valid |
+| `BINGO_PAIRING_TTL_SECONDS` | `300` | How long a QR stays valid |
 | `BINGO_DEFAULT_CARD_COUNT` | `2` | Cards per guest |
 | `BINGO_MAX_CARD_COUNT` | `12` | Ceiling per pairing |
 | `BINGO_PAIRING_RATE_LIMIT_PER_MINUTE` | `20` | Limit on creating and claiming QRs |
@@ -494,7 +524,7 @@ generation, Jinja2 and vanilla JS on the front end. No build step.
 ### Decisions worth knowing
 
 **The QR holds a URL, not card data.** What is encoded is
-`BASE_URL/pair/{nonce}`, one-time and valid for 120 seconds. Cards are only
+`BASE_URL/pair/{nonce}`, one-time and valid for 300 seconds. Cards are only
 created after the nonce is claimed. Anyone can photograph a QR off the screen, so
 there is nothing sensitive inside it.
 

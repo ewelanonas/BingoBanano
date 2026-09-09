@@ -34,7 +34,9 @@ class Settings(BaseSettings):
     # Password ng host. Walang default — tingnan ang `.env.example`.
     operator_api_key: str = ""
 
-    pairing_ttl_seconds: int = Field(default=120, ge=30, le=900)
+    # Limang minuto: sapat para makapag-scan ang bisitang kumakain o nag-uusap
+    # pa. Ang 120 ay masyadong mabilis sa totoong party.
+    pairing_ttl_seconds: int = Field(default=300, ge=30, le=900)
     default_card_count: int = Field(default=2, ge=1, le=24)
     max_card_count: int = Field(default=12, ge=1, le=24)
     pairing_rate_limit_per_minute: int = Field(default=20, ge=1, le=600)

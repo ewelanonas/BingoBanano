@@ -124,6 +124,9 @@
   </div>
   {% endif %}
 </section>
+
+{% set celebration_word = "WINNER!" if round.game_type == "elimination" else "BINGO!" %}
+{% include "_celebration.html" %}
 {% endblock %}
 
 {% block scripts %}
@@ -330,6 +333,7 @@
       winnerEl.hidden = false;
       winnerEl.textContent =
         `BINGO! ${payload.player_name} - ${payload.card_serial} on ball ${payload.draw_count}`;
+      showCelebration(`${payload.player_name} - ${payload.card_serial}`);
     } else if (payload.event === "bingo_announced") {
       showAnnouncement(payload);
       setStatus(`${payload.player_name} called BINGO. Check their card below.`);
@@ -353,6 +357,7 @@
       winnerEl.textContent = payload.winners.length > 1
         ? `Tie! ${payload.winners.join(" and ")} lasted to ball ${payload.draw_count}.`
         : `${payload.winners[0]} wins, card survived ${payload.draw_count} balls.`;
+      showCelebration(payload.winners.join(" and "), "WINNER!");
       for (const name of payload.winners) {
         const row = document.querySelector(`li.roster-row[data-name="${name}"]`);
         if (row) {

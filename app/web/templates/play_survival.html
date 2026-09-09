@@ -45,6 +45,9 @@
 
   <p id="message" class="status" role="status" aria-live="polite"></p>
 </section>
+
+{% set celebration_word = "WINNER!" %}
+{% include "_celebration.html" %}
 {% endblock %}
 
 {% block scripts %}
@@ -113,8 +116,10 @@
         setVerdict("winner", payload.winners.length > 1
           ? "You win, tied with someone!"
           : "You win! Your card lasted the longest.");
+        showCelebration(`${MY_NAME}, last one standing!`, "WINNER!");
       } else {
         messageEl.textContent = `${payload.winners.join(" and ")} won this round.`;
+        showCelebration(`${payload.winners.join(" and ")} won!`, "WINNER!");
       }
     }
   });

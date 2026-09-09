@@ -135,7 +135,7 @@ if (Test-Path $envPath) {
         "BINGO_OPERATOR_API_KEY=$apiKey",
         "BINGO_PUBLIC_BASE_URL=$baseUrl",
         'BINGO_DATABASE_URL=sqlite+aiosqlite:///./bingobanano.db',
-        'BINGO_PAIRING_TTL_SECONDS=120',
+        'BINGO_PAIRING_TTL_SECONDS=300',
         'BINGO_DEFAULT_CARD_COUNT=2',
         'BINGO_MAX_CARD_COUNT=12',
         'BINGO_PAIRING_RATE_LIMIT_PER_MINUTE=20',

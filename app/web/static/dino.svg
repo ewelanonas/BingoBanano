@@ -1,0 +1,90 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 320" width="1200" height="320"
+     role="img" aria-label="Cartoon dinosaur island with palm trees and a volcano">
+  <defs>
+    <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#8fd4e8"/>
+      <stop offset="100%" stop-color="#d8f0e4"/>
+    </linearGradient>
+    <linearGradient id="sea" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#3fa9c9"/>
+      <stop offset="100%" stop-color="#2b7fa3"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="1200" height="320" fill="url(#sky)"/>
+
+  <!-- Volcano -->
+  <path d="M760 250 L880 96 L1000 250 Z" fill="#6b5b52"/>
+  <path d="M840 150 L880 96 L920 150 Q880 168 840 150 Z" fill="#8a746a"/>
+  <path d="M862 100 q8 -22 18 -6 q10 -18 18 4 q-18 12 -36 2 Z" fill="#e8724a"/>
+  <path d="M760 250 L820 172 L860 250 Z" fill="#5d4f47" opacity="0.55"/>
+
+  <!-- Far hills -->
+  <path d="M0 250 Q120 176 250 250 Z" fill="#5fa86e"/>
+  <path d="M180 250 Q320 162 470 250 Z" fill="#4f9760"/>
+
+  <!-- Sea -->
+  <rect y="250" width="1200" height="70" fill="url(#sea)"/>
+  <path d="M0 258 q40 10 80 0 t80 0 t80 0 t80 0 t80 0 t80 0 t80 0 t80 0 t80 0 t80 0 t80 0 t80 0 t80 0 t80 0"
+        fill="none" stroke="#bdeaf5" stroke-width="4" opacity="0.7"/>
+
+  <!-- Sand -->
+  <path d="M0 250 h1200 v14 q-300 22 -600 4 T0 268 Z" fill="#e6d3a3"/>
+
+  <!-- Palm left -->
+  <g>
+    <path d="M120 250 q-8 -50 6 -84" stroke="#8a6b4a" stroke-width="11" fill="none"
+          stroke-linecap="round"/>
+    <path d="M126 166 q-46 -18 -66 6 q40 -4 66 10 Z" fill="#3f8f52"/>
+    <path d="M126 166 q46 -20 68 4 q-42 -2 -68 12 Z" fill="#47a05c"/>
+    <path d="M126 166 q-14 -44 12 -60 q6 40 -4 62 Z" fill="#3f8f52"/>
+  </g>
+
+  <!-- Palm right -->
+  <g>
+    <path d="M1090 250 q10 -44 -4 -74" stroke="#8a6b4a" stroke-width="10" fill="none"
+          stroke-linecap="round"/>
+    <path d="M1086 176 q-42 -16 -60 6 q36 -4 60 8 Z" fill="#47a05c"/>
+    <path d="M1086 176 q42 -18 62 4 q-38 -2 -62 10 Z" fill="#3f8f52"/>
+  </g>
+
+  <!-- Brontosaurus -->
+  <g>
+    <path d="M300 252 q-4 -46 34 -58 q40 -12 74 8 q28 14 26 50 Z" fill="#63b06f"/>
+    <path d="M334 196 q-10 -56 22 -74 q30 -16 44 8 q-26 -6 -36 12 q-12 22 -4 56 Z" fill="#63b06f"/>
+    <path d="M396 128 q22 -12 34 4 q-6 18 -30 14 Z" fill="#71bd7c"/>
+    <circle cx="416" cy="136" r="3.4" fill="#2c3b2f"/>
+    <path d="M300 252 q-44 -6 -66 -26 q30 4 62 -6 Z" fill="#71bd7c"/>
+    <path d="M330 252 v18 h14 v-18 Z M382 252 v18 h14 v-18 Z" fill="#4f9760"/>
+    <circle cx="356" cy="212" r="7" fill="#8fcd97" opacity="0.75"/>
+    <circle cx="386" cy="222" r="6" fill="#8fcd97" opacity="0.75"/>
+  </g>
+
+  <!-- Little T-rex -->
+  <g>
+    <path d="M560 254 q-6 -40 26 -50 q34 -10 52 14 q16 20 8 36 Z" fill="#e2a24c"/>
+    <path d="M612 214 q-6 -34 22 -42 q26 -8 34 12 q6 18 -12 26 Z" fill="#e2a24c"/>
+    <path d="M646 196 q22 2 26 12 q-14 8 -30 2 Z" fill="#eeb668"/>
+    <circle cx="642" cy="192" r="3" fill="#2c3b2f"/>
+    <path d="M560 254 q-34 -10 -48 -30 q26 2 50 8 Z" fill="#eeb668"/>
+    <path d="M584 254 v16 h12 v-16 Z M626 254 v16 h12 v-16 Z" fill="#c98a36"/>
+    <path d="M596 210 l8 -12 l8 12 l8 -12 l8 12" fill="none" stroke="#c98a36" stroke-width="4"
+          stroke-linecap="round"/>
+  </g>
+
+  <!-- Eggs -->
+  <g>
+    <ellipse cx="700" cy="262" rx="13" ry="17" fill="#f4ead4"/>
+    <ellipse cx="724" cy="266" rx="11" ry="14" fill="#f4ead4"/>
+    <circle cx="696" cy="258" r="2.6" fill="#d9c9a4"/>
+    <circle cx="706" cy="266" r="2.2" fill="#d9c9a4"/>
+    <circle cx="722" cy="263" r="2.2" fill="#d9c9a4"/>
+  </g>
+
+  <!-- Ferns -->
+  <g fill="#3f8f52" opacity="0.85">
+    <path d="M470 252 q-14 -22 2 -34 q4 20 12 34 Z"/>
+    <path d="M496 252 q10 -20 -4 -32 q-2 18 -10 32 Z"/>
+    <path d="M980 252 q-14 -20 0 -32 q4 18 12 32 Z"/>
+  </g>
+</svg>
