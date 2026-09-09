@@ -34,11 +34,12 @@ Two ways to run, depending on where your guests are:
 | Guests are | Mode | What you need |
 |---|---|---|
 | On your Wi-Fi | LAN | A firewall rule for port 8000 |
-| On mobile data, or a different network | Tunnel | `cloudflared`, no firewall rule |
+| On mobile data, or a different network | Tunnel or hosted | See [Guests on mobile data](#guests-on-mobile-data-or-another-network) |
 
-Start with LAN. Switch to a tunnel only when someone cannot join, and read
-[Guests on mobile data](#guests-on-mobile-data-or-another-network) first because
-a tunnel puts the game on the internet.
+Start with LAN. It is the simplest thing that works, and at a party your guests
+are usually standing next to you — your Wi-Fi password solves it. Reach for a
+tunnel only when someone genuinely cannot be on your network, and read that
+section first, because it puts the game on the internet.
 
 ## Setup
 
@@ -162,12 +163,22 @@ data cannot reach `192.168.1.185` — that address does not exist outside your
 network, so their phone times out. The same is true if you are on Ethernet and
 they are on a different Wi-Fi.
 
-To let anyone join from anywhere, the server needs to be reachable from the
-internet. The easiest way is a Cloudflare tunnel, which opens an outbound
-connection from your machine and hands back a public HTTPS URL. No firewall rule,
-no port forwarding, no router changes.
+Before reaching for a tunnel, consider the boring option: **at a party, everyone
+is in the same room.** Give guests your Wi-Fi password and LAN mode just works,
+with no extra moving parts. Tunnels are for guests who genuinely are not there.
 
-Install `cloudflared` once:
+If you do need a public link, there are three routes. Try them in this order.
+
+| Route | Setup | Reliability |
+|---|---|---|
+| Cloudflare tunnel | One install, no account | Good, but QUIC and DNS filtering trip it up |
+| ngrok tunnel | One install plus a free account | Better: TCP only, and a local dashboard that shows every request |
+| Hosting it | A deploy, no local networking at all | Best: your Wi-Fi, router, and firewall stop mattering |
+
+### Route 1: Cloudflare tunnel
+
+Opens an outbound connection from your machine and hands back a public HTTPS URL.
+No firewall rule, no port forwarding, no router changes.
 
 ```powershell
 winget install --id Cloudflare.cloudflared
@@ -199,6 +210,57 @@ Open the tunnel URL plus `/operator` and host the game exactly as before. The QR
 now contains the public HTTPS link, so guests can scan it from mobile data,
 another Wi-Fi, or another city.
 
+### Route 2: ngrok
+
+If Cloudflare keeps failing, switch providers. ngrok only uses TCP 443, so the
+QUIC problem cannot happen, and it runs a local dashboard at
+`http://127.0.0.1:4040` that shows every request as it arrives — which makes it
+obvious whether anything is reaching you at all.
+
+```powershell
+winget install --id Ngrok.Ngrok
+```
+
+Sign up free at [ngrok.com](https://dashboard.ngrok.com/signup), copy your
+authtoken, and register it once:
+
+```powershell
+ngrok config add-authtoken YOUR_AUTHTOKEN_HERE
+```
+
+Then:
+
+```powershell
+.\scripts\start-tunnel.ps1 -StartServer -Provider ngrok
+```
+
+The script reads the public URL from ngrok's local API rather than scraping log
+output, so URL discovery is reliable.
+
+### Route 3: host it somewhere
+
+This removes the entire class of problem. Your Wi-Fi, router, firewall, ISP, and
+laptop all stop being involved. Guests get a normal HTTPS URL that works from
+anywhere, and you can host from your phone.
+
+There is a `Dockerfile` in the repo. It works with any container host — Fly.io,
+Render, Railway, Koyeb. The only setting you must provide is
+`BINGO_OPERATOR_API_KEY`, which needs to be at least 32 characters:
+
+```powershell
+python -c "import secrets; print(secrets.token_urlsafe(32))"
+```
+
+The image runs as a non-root user, listens on `$PORT`, and trusts forwarded
+headers because inside a hosting platform the load balancer is the only route to
+the container. Rounds live in an ephemeral SQLite file, which is fine since a
+round only lasts an evening; mount a volume at `/app/data` if you want games to
+survive restarts.
+
+Free tiers change often, so check current terms before picking a host. Watch out
+for platforms that idle your service to sleep — a cold start in the middle of a
+game is annoying.
+
 ### If the script says it cannot confirm the public URL
 
 The script tests the public URL from your own machine. That test can fail while
@@ -216,13 +278,19 @@ https://<your-tunnel>.trycloudflare.com/healthz
 `{"status":"ok"}` on the phone means the tunnel works and only the local test
 failed. Go ahead and play.
 
-**Error 1033 on the phone** means the tunnel really is not connected. The usual
-cause is your router blocking QUIC on UDP 7844, which `cloudflared` uses by
-default. Force it onto TCP 443 instead:
+**Error 1033 on the phone** means the tunnel really is not connected. Two things
+to try, in order:
 
 ```powershell
+# 1. Your router is probably blocking QUIC on UDP 7844, cloudflared's default.
 .\scripts\start-tunnel.ps1 -StartServer -Http2
+
+# 2. Still failing? Change provider.
+.\scripts\start-tunnel.ps1 -StartServer -Provider ngrok
 ```
+
+If neither works, stop fighting your network and use
+[Route 3](#route-3-host-it-somewhere).
 
 ### The tunnel URL is disposable
 

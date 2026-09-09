@@ -30,14 +30,32 @@
     pagkakamalian: pagpatay sa tunnel dahil sa pag-type ng uvicorn command sa
     parehong window.
 
+.PARAMETER Http2
+    Para sa cloudflared: pilitin ang TCP 443 kaysa QUIC (UDP 7844). Hinaharangan
+    ng maraming router ang QUIC, at ang resulta ay error 1033.
+
+.PARAMETER Provider
+    `cloudflared` (default) o `ngrok`.
+
+    Ang ngrok ay mas maaasahan sa dalawang paraan: TCP 443 lang ang gamit niya
+    kaya wala ang QUIC na problema, at may local API siya sa port 4040 kung saan
+    direktang nakukuha ang public URL — hindi na kailangang maghalungkat sa log.
+    Kailangan lang ng libreng account para sa authtoken.
+
 .EXAMPLE
     .\scripts\start-tunnel.ps1 -StartServer
+
+.EXAMPLE
+    # Kapag ayaw gumana ang cloudflared
+    .\scripts\start-tunnel.ps1 -StartServer -Provider ngrok
 #>
 [CmdletBinding()]
 param(
     [int]$Port = 8000,
     [switch]$StartServer,
-    [switch]$Http2
+    [switch]$Http2,
+    [ValidateSet('cloudflared', 'ngrok')]
+    [string]$Provider = 'cloudflared'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -90,8 +108,9 @@ function Test-PublicUrl([string]$Url) {
         return [pscustomobject]@{
             Ok     = $false
             Detail = "Hindi ma-resolve ang $host_ mula sa makinang ito. Malamang " +
-                     'hinaharangan ng DNS, router, o antivirus ang trycloudflare.com. ' +
-                     'Baka gumagana pa rin ito sa phone na naka-mobile data.'
+                     'hinaharangan ng DNS, router, o antivirus ang domain na iyon. ' +
+                     'Baka gumagana pa rin ito sa phone na naka-mobile data. Kung ' +
+                     'cloudflared ito, subukan ang -Provider ngrok.'
         }
     }
 
@@ -147,10 +166,28 @@ if (-not (Test-Path (Join-Path $repo '.env'))) {
     exit 1
 }
 
-$cloudflared = Get-Command cloudflared -ErrorAction SilentlyContinue
-if (-not $cloudflared) {
-    Write-Warn 'Walang cloudflared na naka-install.'
-    Write-Host @"
+$binaryName = if ($Provider -eq 'ngrok') { 'ngrok' } else { 'cloudflared' }
+$binary = Get-Command $binaryName -ErrorAction SilentlyContinue
+
+if (-not $binary) {
+    Write-Warn "Walang $binaryName na naka-install."
+    if ($Provider -eq 'ngrok') {
+        Write-Host @"
+    1. I-install:
+         winget install --id Ngrok.Ngrok
+
+    2. Gumawa ng libreng account sa https://dashboard.ngrok.com/signup
+       tapos kopyahin ang authtoken mula sa
+       https://dashboard.ngrok.com/get-started/your-authtoken
+
+    3. Isagawa isang beses:
+         ngrok config add-authtoken <ang-token-mo>
+
+    4. Patakbuhin muli:
+         .\scripts\start-tunnel.ps1 -StartServer -Provider ngrok
+"@ -ForegroundColor Gray
+    } else {
+        Write-Host @"
     I-install ito sa isa sa mga paraang ito:
 
       winget install --id Cloudflare.cloudflared
@@ -158,12 +195,10 @@ if (-not $cloudflared) {
     O i-download ang cloudflared-windows-amd64.exe mula sa
     https://github.com/cloudflare/cloudflared/releases at ilagay sa PATH.
 
-    Alternatibo kung ayaw mo ng cloudflared: ngrok.
-      winget install --id Ngrok.Ngrok
-      ngrok http $Port
-    Buksan ang https URL na ibibigay nito, tapos maglaro. Hindi na kailangang
-    baguhin ang .env.
+    Kung paulit-ulit na bumibigo ang cloudflared, subukan ang ngrok:
+      .\scripts\start-tunnel.ps1 -StartServer -Provider ngrok
 "@ -ForegroundColor Gray
+    }
     exit 1
 }
 
@@ -217,19 +252,48 @@ if (Test-ServerUp) {
 Write-Step "Binubuksan ang tunnel papunta sa http://127.0.0.1:$Port"
 Write-Note 'Ang unang koneksyon ay tumatagal ng ilang segundo.'
 
-$tunnelArgs = @('tunnel', '--no-autoupdate', '--url', "http://127.0.0.1:$Port")
-if ($Http2) {
-    # Ang default ng cloudflared ay QUIC sa UDP 7844. Hinaharangan iyon ng
-    # maraming home router at ISP, at ang resulta ay tunnel na mukhang bukas
-    # pero hindi naghahatid. Ang http2 ay dumadaan sa TCP 443.
-    $tunnelArgs += @('--protocol', 'http2')
-    Write-Note 'Gumagamit ng http2 protocol (TCP 443) kaysa QUIC.'
+if ($Provider -eq 'ngrok') {
+    $tunnelArgs = @('http', "$Port", '--log', 'stdout')
+} else {
+    $tunnelArgs = @('tunnel', '--no-autoupdate', '--url', "http://127.0.0.1:$Port")
+    if ($Http2) {
+        # Ang default ng cloudflared ay QUIC sa UDP 7844. Hinaharangan iyon ng
+        # maraming home router at ISP, at ang resulta ay tunnel na mukhang bukas
+        # pero hindi naghahatid. Ang http2 ay dumadaan sa TCP 443.
+        $tunnelArgs += @('--protocol', 'http2')
+        Write-Note 'Gumagamit ng http2 protocol (TCP 443) kaysa QUIC.'
+    }
 }
 
 $logFile = Join-Path ([System.IO.Path]::GetTempPath()) "bingobanano-tunnel-$PID.log"
-$process = Start-Process -FilePath $cloudflared.Source -ArgumentList $tunnelArgs `
+$process = Start-Process -FilePath $binary.Source -ArgumentList $tunnelArgs `
     -RedirectStandardError $logFile -RedirectStandardOutput "$logFile.out" `
     -NoNewWindow -PassThru
+
+function Get-NgrokUrl {
+    <#
+        Ang ngrok ay may local API sa 4040. Mas maaasahan itong pagkuhanan ng
+        URL kaysa maghalungkat sa log output.
+    #>
+    try {
+        $api = Invoke-RestMethod -Uri 'http://127.0.0.1:4040/api/tunnels' -TimeoutSec 3
+        $https = $api.tunnels | Where-Object { $_.public_url -like 'https://*' } | Select-Object -First 1
+        if ($https) { return $https.public_url }
+    } catch {
+        return $null
+    }
+    return $null
+}
+
+function Get-CloudflaredUrl([string[]]$Paths) {
+    foreach ($path in $Paths) {
+        if (-not (Test-Path $path)) { continue }
+        $match = Select-String -Path $path -Pattern 'https://[a-z0-9-]+\.trycloudflare\.com' `
+            -ErrorAction SilentlyContinue | Select-Object -First 1
+        if ($match) { return $match.Matches[0].Value }
+    }
+    return $null
+}
 
 $publicUrl = $null
 $deadline = (Get-Date).AddSeconds(45)
@@ -238,26 +302,35 @@ try {
     while ((Get-Date) -lt $deadline -and -not $publicUrl) {
         Start-Sleep -Milliseconds 500
         if ($process.HasExited) { break }
-        foreach ($path in @($logFile, "$logFile.out")) {
-            if (-not (Test-Path $path)) { continue }
-            $match = Select-String -Path $path -Pattern 'https://[a-z0-9-]+\.trycloudflare\.com' `
-                -ErrorAction SilentlyContinue | Select-Object -First 1
-            if ($match) {
-                $publicUrl = $match.Matches[0].Value
-                break
-            }
+        $publicUrl = if ($Provider -eq 'ngrok') {
+            Get-NgrokUrl
+        } else {
+            Get-CloudflaredUrl @($logFile, "$logFile.out")
         }
     }
 
     if (-not $publicUrl) {
-        Write-Warn 'Hindi nakuha ang tunnel URL sa loob ng 45 segundo.'
-        if (Test-Path $logFile) { Get-Content $logFile -Tail 15 | ForEach-Object { Write-Note $_ } }
+        Write-Warn "Hindi nakuha ang tunnel URL mula sa $binaryName sa loob ng 45 segundo."
+        foreach ($path in @($logFile, "$logFile.out")) {
+            if (Test-Path $path) {
+                Get-Content $path -Tail 20 -ErrorAction SilentlyContinue |
+                    ForEach-Object { Write-Note $_ }
+            }
+        }
+        if ($Provider -eq 'ngrok') {
+            Write-Note 'Kung may sinasabing authentication: ngrok config add-authtoken <token>'
+        } else {
+            Write-Note 'Subukan ang ngrok: .\scripts\start-tunnel.ps1 -StartServer -Provider ngrok'
+        }
         if (-not $process.HasExited) { $process | Stop-Process -Force }
         exit 1
     }
 
     Write-Step 'Bukas na ang tunnel'
     Write-Good "Public URL: $publicUrl"
+    if ($Provider -eq 'ngrok') {
+        Write-Note 'ngrok dashboard: http://127.0.0.1:4040 (ipinapakita ang bawat request)'
+    }
 
     # --- 4. Subukan mismo ang public URL ----------------------------------
 
@@ -290,12 +363,18 @@ try {
     nang maglaro — probe lang ang bigo. Kung error 1033 sa phone, doon lang
     talagang patay ang tunnel.
 
-    Kung 1033 talaga: karaniwang dahilan ay hinaharangan ng router ang QUIC
-    (UDP 7844) na default ng cloudflared. Subukan ito:
+    Kung 1033 talaga, dalawang bagay ang subukan, sa ganitong pagkakasunod:
 
-        Ctrl+C, tapos: .\scripts\start-tunnel.ps1 -StartServer -Http2
+      1. QUIC ang default ng cloudflared sa UDP 7844, at hinaharangan iyon ng
+         maraming router. Pilitin ang TCP 443:
+             Ctrl+C, tapos: .\scripts\start-tunnel.ps1 -StartServer -Http2
 
-    Huling 15 linya ng cloudflared log:
+      2. Kung bumigo pa rin, magpalit ng provider. Ang ngrok ay TCP 443 lang at
+         may local dashboard sa http://127.0.0.1:4040 na nagpapakita ng bawat
+         request, kaya malinaw agad kung may umaabot:
+             .\scripts\start-tunnel.ps1 -StartServer -Provider ngrok
+
+    Huling 15 linya ng $binaryName log:
 "@ -ForegroundColor Yellow
         foreach ($path in @($logFile, "$logFile.out")) {
             if (Test-Path $path) {
