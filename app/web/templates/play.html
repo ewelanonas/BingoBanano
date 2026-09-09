@@ -19,6 +19,13 @@
     </dl>
   </div>
 
+  <div class="field checkbox daub-toggle">
+    <input id="auto-daub" type="checkbox" checked>
+    <label for="auto-daub">
+      Mark my numbers automatically. Turn this off to tap them yourself.
+    </label>
+  </div>
+
   <button id="bingo-button" type="button" class="btn bingo">BINGO!</button>
   <p id="claim-message" class="status" role="status" aria-live="polite"></p>
 
@@ -40,10 +47,14 @@
             {% if value == 0 %}
             <td class="free marked">
               <span aria-hidden="true">FREE</span>
-              <span class="sr-only">Free space, marked</span>
+              <span class="sr-only">Free space, already marked</span>
             </td>
             {% else %}
-            <td data-ball="{{ value }}">{{ value }}</td>
+            <td data-ball="{{ value }}">
+              <button type="button" class="dab" data-ball="{{ value }}" aria-pressed="false">
+                {{ value }}
+              </button>
+            </td>
             {% endif %}
             {% endfor %}
           </tr>
@@ -67,18 +78,46 @@
   const missingEl = document.getElementById("missing");
   const messageEl = document.getElementById("claim-message");
   const bingoButton = document.getElementById("bingo-button");
+  const autoDaub = document.getElementById("auto-daub");
 
+  // `drawn` is what the caller actually pulled, straight from the server.
+  // `marked` is what this player has dabbed. We only ever allow marking a
+  // number that was drawn, so `marked` stays a subset of `drawn` and the BINGO
+  // button can never light up on a card that would not really win.
   const drawn = new Set();
+  const marked = new Set();
 
-  function markBall(ball) {
-    drawn.add(ball);
-    for (const cell of document.querySelectorAll(`td[data-ball="${ball}"]`)) {
-      cell.classList.add("marked");
+  function cellsFor(ball) {
+    return document.querySelectorAll(`td[data-ball="${ball}"]`);
+  }
+
+  function paint(ball) {
+    const isMarked = marked.has(ball);
+    const isCallable = drawn.has(ball) && !isMarked;
+    for (const cell of cellsFor(ball)) {
+      cell.classList.toggle("marked", isMarked);
+      cell.classList.toggle("callable", isCallable);
+      const button = cell.querySelector("button.dab");
+      if (button) { button.setAttribute("aria-pressed", String(isMarked)); }
     }
   }
 
-  // This count is presentation only. The server still decides whether a claim
-  // is a real BINGO.
+  function setMarked(ball, on) {
+    if (on) { marked.add(ball); } else { marked.delete(ball); }
+    paint(ball);
+    updateMissing();
+  }
+
+  function refuse(ball) {
+    for (const cell of cellsFor(ball)) {
+      cell.classList.remove("refused");
+      // Restart the animation on a rapid second tap.
+      void cell.offsetWidth;
+      cell.classList.add("refused");
+    }
+  }
+
+  // Presentation only. The server still decides whether a claim is a real BINGO.
   function updateMissing() {
     let best = 99;
     for (const card of CARDS) {
@@ -86,7 +125,7 @@
         let gap = 0;
         for (const cell of group) {
           const value = card.numbers[cell];
-          if (value !== 0 && !drawn.has(value)) { gap += 1; }
+          if (value !== 0 && !marked.has(value)) { gap += 1; }
         }
         best = Math.min(best, gap);
       }
@@ -94,6 +133,37 @@
     missingEl.textContent = best === 0 ? "0 - press BINGO" : String(best);
     bingoButton.classList.toggle("ready", best === 0);
   }
+
+  function registerDraw(ball) {
+    drawn.add(ball);
+    if (autoDaub.checked) {
+      setMarked(ball, true);
+    } else {
+      paint(ball);
+      updateMissing();
+    }
+  }
+
+  for (const button of document.querySelectorAll("button.dab")) {
+    button.addEventListener("click", () => {
+      const ball = Number(button.dataset.ball);
+      if (!drawn.has(ball)) {
+        // Not called yet. Refuse rather than let someone mark ahead and then
+        // wonder why their BINGO was rejected.
+        refuse(ball);
+        messageEl.textContent = `${ball} has not been called yet.`;
+        return;
+      }
+      setMarked(ball, !marked.has(ball));
+    });
+  }
+
+  autoDaub.addEventListener("change", () => {
+    if (!autoDaub.checked) { return; }
+    // Catch up on anything already called but not yet dabbed.
+    for (const ball of drawn) { marked.add(ball); paint(ball); }
+    updateMissing();
+  });
 
   bingoButton.addEventListener("click", async () => {
     bingoButton.disabled = true;
@@ -111,15 +181,14 @@
   socket.addEventListener("message", (event) => {
     const payload = JSON.parse(event.data);
     if (payload.event === "snapshot") {
-      for (const ball of payload.drawn) { markBall(ball); }
+      for (const ball of payload.drawn) { registerDraw(ball); }
       lastCallEl.textContent = payload.last_call || "--";
       drawCountEl.textContent = payload.draw_count;
       updateMissing();
     } else if (payload.event === "ball_drawn") {
-      markBall(payload.ball);
+      registerDraw(payload.ball);
       lastCallEl.textContent = payload.call;
       drawCountEl.textContent = payload.sequence_no;
-      updateMissing();
     } else if (payload.event === "round_won") {
       messageEl.textContent =
         `${payload.player_name} won with ${payload.card_serial} on ball ${payload.draw_count}.`;

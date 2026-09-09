@@ -18,7 +18,8 @@ Guests only enter a nickname. No accounts, no sign-up, no app to install.
   stamp, letter X, cross, kite, blackout
 - **Live draw engine** — manual or auto-draw, no ball is ever drawn twice
 - **Caller screen** — large `B-7` display and a 1-to-75 board
-- **Player board** — auto-daub, a "numbers needed" counter, and a BINGO button
+- **Player board** — tap your own numbers or let them mark themselves, plus a
+  "numbers needed" counter and a BINGO button
 - **Server-side verification** — no marking data is accepted from the phone
 
 ## Requirements
@@ -135,6 +136,12 @@ Once everyone has joined, press **Open caller screen**. From there:
 Cards mark themselves on each guest's phone. When the "Needed" counter reaches 0,
 the BINGO button lights up. They press it and the server decides.
 
+Guests who want the real dabbing experience can switch off **Mark my numbers
+automatically** and tap each number themselves. Tapping a number that has not
+been called yet is refused with a nudge, so nobody marks ahead and then wonders
+why their BINGO was rejected. Cells that were called but not yet dabbed are
+outlined, so it is easy to catch up.
+
 If two players complete the pattern on the same ball, both win — co-winners, the
 same way a real bingo hall handles it.
 
@@ -188,7 +195,7 @@ app/
   services/    # pairing, rounds, issuance, audit, events
   api/         # HTTP and WebSocket routes
   web/         # Jinja2 templates and CSS
-tests/         # 70 tests
+tests/         # 71 tests
 scripts/       # setup-dev.ps1
 ```
 
@@ -229,7 +236,7 @@ a login.
 ## Development
 
 ```powershell
-.\.venv\Scripts\python.exe -m pytest -q          # 70 tests
+.\.venv\Scripts\python.exe -m pytest -q          # 71 tests
 .\.venv\Scripts\python.exe -m ruff check .
 .\.venv\Scripts\python.exe -m ruff format .
 .\.venv\Scripts\python.exe -m mypy               # strict on app/domain

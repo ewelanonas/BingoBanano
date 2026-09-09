@@ -362,3 +362,26 @@ async def test_play_board_renders_the_stored_cards(
         assert card.serial in page.text
     assert "BINGO!" in page.text
     assert "letter x" in page.text
+
+
+async def test_play_board_cells_are_tappable_buttons(
+    client: AsyncClient, operator_headers: dict[str, str]
+) -> None:
+    """Bawat numero ay button para puwedeng i-dab nang manual at keyboard-accessible."""
+    game = await make_round(client, operator_headers, "any_line")
+    token = await join(client, operator_headers, game["id"], card_count=1)
+
+    page = await client.get(f"/play/{token}")
+    cards = await cards_of(token)
+    numbers = [value for value in cards[0].numbers if value]
+
+    # 24 na numero kada card, ang FREE center ay hindi pinipindot.
+    assert len(numbers) == 24
+    assert page.text.count('class="dab"') == 24
+    assert page.text.count('aria-pressed="false"') == 24
+    for value in numbers:
+        assert f'data-ball="{value}"' in page.text
+
+    # Ang auto-daub toggle ay naka-on sa simula.
+    assert 'id="auto-daub"' in page.text
+    assert "Turn this off to tap them yourself" in page.text
