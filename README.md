@@ -173,17 +173,21 @@ Install `cloudflared` once:
 winget install --id Cloudflare.cloudflared
 ```
 
-Then, with the server not yet running:
+Then let the script run both the tunnel and the server:
 
 ```powershell
-.\scripts\start-tunnel.ps1
+.\scripts\start-tunnel.ps1 -StartServer
 ```
 
-The script prints a URL like `https://sunny-banana-42.trycloudflare.com`, writes
-it into `.env` as `BINGO_PUBLIC_BASE_URL`, and keeps the tunnel open. Leave that
-window alone.
+The script starts the server with the right flags, opens the tunnel, writes the
+public URL into `.env`, restarts the server so it picks that URL up, and then
+fetches the public URL itself to prove it works. It prints the host lobby link
+when everything is confirmed.
 
-In a second window, start the server the way a tunnel expects:
+Leave that window open for the whole game. Closing it kills the tunnel.
+
+If you would rather run the server yourself, start it in a **separate** window
+first and then run the script without `-StartServer`:
 
 ```powershell
 .\.venv\Scripts\python.exe -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --proxy-headers --forwarded-allow-ips="127.0.0.1"
@@ -192,6 +196,21 @@ In a second window, start the server the way a tunnel expects:
 Open the tunnel URL plus `/operator` and host the game exactly as before. The QR
 now contains the public HTTPS link, so guests can scan it from mobile data,
 another Wi-Fi, or another city.
+
+### The tunnel URL is disposable
+
+Every run of the script gets a **different** random URL, and the URL dies the
+moment the tunnel closes. Two consequences that bite in practice:
+
+- Old QR codes stop working. After restarting a tunnel, generate a fresh QR. A
+  guest scanning a stale one gets **Cloudflare error 1033**.
+- The server must be running with the current URL in `.env`. The script handles
+  the restart for you when you pass `-StartServer`; otherwise it stops and waits
+  for you to restart it manually.
+
+When the tunnel closes, the script puts your previous `BINGO_PUBLIC_BASE_URL`
+back into `.env`, so a dead tunnel URL is not left behind to generate broken QRs
+the next time you play on the LAN.
 
 ### Read this before you tunnel
 
@@ -238,6 +257,8 @@ Open `http://<LAN-IP>:8000/healthz` in the **phone's browser**. You should see
 | Phone tries to open itself | `localhost` is encoded in the QR | Set `BINGO_PUBLIC_BASE_URL` to the LAN IP or a tunnel URL |
 | IP changed after rejoining Wi-Fi | New DHCP lease | Update `BINGO_PUBLIC_BASE_URL` and restart |
 | Host cannot sign in, returns 429 | Login rate limit tripped | Wait a minute; it is 10 attempts per IP |
+| **Cloudflare error 1033** | The tunnel is not connected: its window was closed, or the QR is from an older tunnel run | Restart `start-tunnel.ps1`, leave it open, and generate a **new** QR |
+| Cloudflare error 502 through the tunnel | Tunnel is up but the server is not answering on `127.0.0.1:8000` | Start the server, or check it is bound to `127.0.0.1` and not another address |
 
 The lobby shows the current QR base URL under the form, and the app returns a
 warning when it points at `localhost`, so a misconfiguration is visible right
