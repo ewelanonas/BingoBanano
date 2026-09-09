@@ -1,9 +1,11 @@
 # BingoBanano
 
 Bingo for house parties. 75-ball, Philippine style. The host shows a QR code on a
-laptop, guests scan it with their phone camera, and they get cards instantly. The
-caller draws balls, every player's card marks itself live, and the server decides
-whether a BINGO is real.
+laptop, guests scan it with their phone camera, and they are in. Two games:
+
+- **Classic** — everyone gets a 5x5 card and races to complete a pattern
+- **Elimination** — everyone gets a number instead. When it is called, you are
+  out. Last one standing wins
 
 Guests only enter a nickname. No accounts, no sign-up, no app to install.
 
@@ -13,6 +15,7 @@ Guests only enter a nickname. No accounts, no sign-up, no app to install.
 ## What works
 
 - **QR pairing** — one QR per guest, single-use, expires after 120 seconds
+- **Two games** — classic pattern bingo, or last-one-standing elimination
 - **Card generation** — 75-ball, 5x5 grid, FREE center, generated server-side
 - **19 patterns** — any line, rows, columns, diagonals, four corners, postage
   stamp, letter X, cross, kite, blackout
@@ -118,8 +121,17 @@ HttpOnly cookie, so it never becomes visible to JavaScript on the page.
 
 ### 3. Create a round
 
-In the host lobby, pick a pattern and name the round. For a first game, try
-`any_line` — it finishes fastest.
+First pick the game.
+
+**Classic bingo** gives everyone a 5x5 card and a pattern to complete. Choose a
+pattern too — `any_line` finishes fastest, good for a first game.
+
+**Elimination** gives everyone a number instead of a card. When that number is
+called, they are out, and the last one standing wins. You can hand each guest up
+to 5 numbers to make rounds shorter. Numbers are unique across guests, so one call
+knocks out exactly one person, which keeps it dramatic. There is no BINGO button
+in this game because knockouts are automatic. It needs the app to know the
+numbers, so cards-only calling is not available for it.
 
 Then choose who calls the numbers:
 
@@ -426,7 +438,7 @@ app/
   services/    # pairing, rounds, issuance, audit, events
   api/         # HTTP and WebSocket routes
   web/         # Jinja2 templates and CSS
-tests/         # 100 tests
+tests/         # 118 tests
 scripts/       # setup-dev.ps1, start-tunnel.ps1
 ```
 
@@ -470,6 +482,12 @@ decision to the host instead of guessing.
 **In app-draws mode the host cannot choose a ball.** Supplying one is rejected,
 because a host who could pick the numbers could pick the winner.
 
+**Elimination numbers are unique per round, enforced by the database.** A unique
+constraint on `(round_id, number)` means two guests can never be handed the same
+number even if they scan at the same moment. That is also why one call removes
+exactly one guest. If the very last survivor's number comes up, they still win,
+having outlasted everyone.
+
 **Only a nickname is stored about a player.** No birth date, no email, no ID. A
 player's live board is reachable through an unguessable capability URL rather than
 a login.
@@ -483,7 +501,7 @@ cannot use, so that falls back to `BINGO_PUBLIC_BASE_URL`.
 ## Development
 
 ```powershell
-.\.venv\Scripts\python.exe -m pytest -q          # 100 tests
+.\.venv\Scripts\python.exe -m pytest -q          # 118 tests
 .\.venv\Scripts\python.exe -m ruff check .
 .\.venv\Scripts\python.exe -m ruff format .
 .\.venv\Scripts\python.exe -m mypy               # strict on app/domain

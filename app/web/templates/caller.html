@@ -11,8 +11,13 @@
     Caller <span class="join-code">{{ round.join_code }}</span>
   </h1>
   <p class="muted">
+    {% if round.game_type == "elimination" %}
+    Elimination &middot; {{ round.ticket_count }} players &middot;
+    {{ round.numbers_per_ticket }} number{{ "s" if round.numbers_per_ticket > 1 else "" }} each
+    {% else %}
     Pattern: <strong>{{ round.pattern.replace("_", " ") }}</strong> &middot;
     {{ round.player_count }} players &middot; {{ round.card_count }} cards
+    {% endif %}
   </p>
 
   {% if round.caller_mode == "offline" %}
@@ -66,6 +71,30 @@
 
   <p id="status" class="status" role="status" aria-live="polite"></p>
   <div id="winner" class="winner" hidden></div>
+
+  {% if round.game_type == "elimination" %}
+  <h2 class="section-title">
+    Who's left <span id="survivor-count" class="join-code">{{ round.survivors }}</span>
+    of {{ round.ticket_count }}
+  </h2>
+  <ul class="roster" id="roster">
+    {% for entry in roster %}
+    <li class="roster-row {% if entry.out %}out{% endif %}
+               {% if entry.is_winner %}winner-row{% endif %}"
+        data-name="{{ entry.player_name }}">
+      <span class="roster-name">{{ entry.player_name }}</span>
+      <span class="roster-numbers">
+        {% for number in entry.numbers %}<b>{{ number }}</b>{% endfor %}
+      </span>
+      <span class="roster-state">
+        {% if entry.is_winner %}winner
+        {% elif entry.out %}out on {{ entry.out_on }}
+        {% else %}in{% endif %}
+      </span>
+    </li>
+    {% endfor %}
+  </ul>
+  {% endif %}
 
   {% if round.caller_mode == "offline" %}
   <h2 class="section-title">Called BINGOs</h2>
@@ -283,6 +312,34 @@
     } else if (payload.event === "bingo_announced") {
       showAnnouncement(payload);
       setStatus(`${payload.player_name} called BINGO. Check their card below.`);
+    } else if (payload.event === "players_eliminated") {
+      const survivorCount = document.getElementById("survivor-count");
+      if (survivorCount) { survivorCount.textContent = payload.survivors; }
+      for (const person of payload.players) {
+        const row = document.querySelector(`li.roster-row[data-name="${person.player_name}"]`);
+        if (row) {
+          row.classList.add("out");
+          const state = row.querySelector(".roster-state");
+          if (state) { state.textContent = `out on ${payload.call}`; }
+          document.getElementById("roster").append(row);
+        }
+      }
+      const names = payload.players.map((p) => p.player_name).join(", ");
+      setStatus(`${payload.call} knocked out ${names}. ${payload.survivors} still in.`);
+    } else if (payload.event === "elimination_over") {
+      setRoundStatus("won");
+      winnerEl.hidden = false;
+      winnerEl.textContent = payload.winners.length > 1
+        ? `Tie! ${payload.winners.join(" and ")} survived to ball ${payload.draw_count}.`
+        : `${payload.winners[0]} wins, last one standing after ${payload.draw_count} balls.`;
+      for (const name of payload.winners) {
+        const row = document.querySelector(`li.roster-row[data-name="${name}"]`);
+        if (row) {
+          row.classList.add("winner-row");
+          const state = row.querySelector(".roster-state");
+          if (state) { state.textContent = "winner"; }
+        }
+      }
     } else if (payload.event === "round_closed") {
       setRoundStatus("closed");
     }

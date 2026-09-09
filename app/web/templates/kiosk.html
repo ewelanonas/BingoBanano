@@ -17,6 +17,13 @@
 
   <form id="round-form" class="row">
     <div class="field">
+      <label for="game_type">Game</label>
+      <select id="game_type" name="game_type">
+        <option value="classic" selected>Classic bingo</option>
+        <option value="elimination">Elimination</option>
+      </select>
+    </div>
+    <div class="field" id="pattern-field">
       <label for="pattern">Pattern</label>
       <select id="pattern" name="pattern">
         {% for name in patterns %}
@@ -30,6 +37,11 @@
       <label for="label">Round name</label>
       <input id="label" name="label" type="text" maxlength="64" placeholder="Living room game">
     </div>
+    <div class="field" id="ticket-field" hidden>
+      <label for="numbers_per_ticket">Numbers per guest</label>
+      <input id="numbers_per_ticket" name="numbers_per_ticket" type="number"
+             min="1" max="5" value="1">
+    </div>
     <div class="field">
       <label for="caller_mode">Who calls the numbers</label>
       <select id="caller_mode" name="caller_mode">
@@ -42,6 +54,12 @@
   </form>
 
   <dl class="mode-help">
+    <dt>Classic bingo</dt>
+    <dd>Everyone gets a 5x5 card and races to complete the pattern.</dd>
+    <dt>Elimination</dt>
+    <dd>Everyone gets a number instead of a card. When a number is called, that
+      guest is out. Last one standing wins. Fast, loud, and good for a crowd.
+      Needs the app to know the numbers, so cards-only mode is not available.</dd>
     <dt>The app draws them</dt>
     <dd>Press a button or let it auto-draw. Cards mark themselves and BINGO is
       checked for you.</dd>
@@ -99,9 +117,29 @@
   const countdownEl = document.getElementById("countdown");
   const joinedEl = document.getElementById("joined");
 
+  const gameType = document.getElementById("game_type");
+  const callerMode = document.getElementById("caller_mode");
+  const patternField = document.getElementById("pattern-field");
+  const ticketField = document.getElementById("ticket-field");
+  const offlineOption = callerMode.querySelector('option[value="offline"]');
+
   let round = null;
   let socket = null;
   let timer = null;
+
+  function applyGameType() {
+    const elimination = gameType.value === "elimination";
+    patternField.hidden = elimination;
+    ticketField.hidden = !elimination;
+    // Ang elimination ay kailangang alam ng app ang bawat bola.
+    offlineOption.disabled = elimination;
+    if (elimination && callerMode.value === "offline") {
+      callerMode.value = "auto";
+    }
+  }
+
+  gameType.addEventListener("change", applyGameType);
+  applyGameType();
 
   const setStatus = (text) => { statusEl.textContent = text; };
 
@@ -168,9 +206,13 @@
       method: "POST",
       headers: { "Content-Type": "application/json", "X-CSRF-Token": CSRF_TOKEN },
       body: JSON.stringify({
+        game_type: gameType.value,
         pattern: document.getElementById("pattern").value,
         label: document.getElementById("label").value,
-        caller_mode: document.getElementById("caller_mode").value,
+        caller_mode: callerMode.value,
+        numbers_per_ticket: gameType.value === "elimination"
+          ? Number(document.getElementById("numbers_per_ticket").value)
+          : 1,
       }),
     });
     if (!response.ok) {

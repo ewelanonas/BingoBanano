@@ -1,10 +1,28 @@
 {% extends "base.html" %}
 {% from "_cards.html" import card_grid %}
-{% block title %}Your cards - BingoBanano{% endblock %}
+{% block title %}You're in - BingoBanano{% endblock %}
 
 {% block content %}
 <section class="panel">
   <h1>You're in, {{ player_name }}</h1>
+
+  {% if is_elimination %}
+  <p class="muted">
+    Elimination round. If any of your numbers is called, you're out. Last one
+    standing wins.
+  </p>
+  <div class="ticket-numbers">
+    {% for number in numbers %}<div class="ticket-number">{{ number }}</div>{% endfor %}
+  </div>
+  <p>
+    <a class="btn primary" href="{{ play_url }}">Open your live board</a>
+  </p>
+  <p class="hint">
+    Keep that open to see the calls and whether you're still in. Bookmark the link
+    in case the tab closes.
+  </p>
+
+  {% else %}
   <p class="muted">
     This round's pattern: <strong>{{ pattern.replace("_", " ") }}</strong>.
   </p>
@@ -18,5 +36,6 @@
   <div class="card-list">
     {% for card in cards %}{{ card_grid(card) }}{% endfor %}
   </div>
+  {% endif %}
 </section>
 {% endblock %}

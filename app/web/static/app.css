@@ -397,3 +397,89 @@ button.board-ball.drawn {
   margin: 0 0 0.5rem;
   font-weight: 700;
 }
+
+/* --- Elimination --- */
+
+.ticket-numbers {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  margin: 1rem 0;
+}
+
+.ticket-number {
+  min-width: 4.2rem;
+  padding: 0.7rem 0.9rem;
+  border: 2px solid var(--accent);
+  border-radius: 12px;
+  background: var(--panel);
+  color: var(--ink);
+  font-size: clamp(1.6rem, 6vw, 2.4rem);
+  font-weight: 800;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+.ticket-number.hit {
+  background: var(--alert-bg);
+  border-color: var(--alert-ink);
+  color: var(--alert-ink);
+  text-decoration: line-through;
+}
+
+.verdict {
+  margin: 1rem 0;
+  padding: 1rem 1.1rem;
+  border-radius: 12px;
+  font-size: 1.15rem;
+  font-weight: 700;
+}
+
+.verdict[data-state="in"] { background: var(--free); color: var(--ink); }
+.verdict[data-state="out"] { background: var(--alert-bg); color: var(--alert-ink); }
+.verdict[data-state="winner"] { background: var(--accent); color: var(--accent-ink); }
+
+.roster {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+.roster-row {
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+  flex-wrap: wrap;
+  padding: 0.6rem 0.9rem;
+  border-bottom: 1px solid var(--line);
+}
+
+.roster-row:last-child { border-bottom: 0; }
+.roster-name { font-weight: 700; min-width: 8rem; }
+
+.roster-numbers b {
+  display: inline-block;
+  margin-right: 0.3rem;
+  padding: 0.1rem 0.45rem;
+  border-radius: 6px;
+  background: var(--free);
+  font-variant-numeric: tabular-nums;
+}
+
+.roster-state { margin-left: auto; color: var(--muted); font-size: 0.85rem; }
+
+.roster-row.out { opacity: 0.55; }
+.roster-row.out .roster-name { text-decoration: line-through; }
+
+.roster-row.winner-row {
+  background: var(--accent);
+  color: var(--accent-ink);
+  opacity: 1;
+}
+
+.roster-row.winner-row .roster-name { text-decoration: none; }
+.roster-row.winner-row .roster-state { color: var(--accent-ink); font-weight: 700; }
+.roster-row.winner-row .roster-numbers b { background: var(--accent-ink); color: var(--accent); }

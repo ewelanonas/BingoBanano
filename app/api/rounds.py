@@ -22,12 +22,18 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import templates
 from app.api.security import OPERATOR_COOKIE, get_session_store, require_operator
-from app.db.models import CALLER_AUTO, CALLER_MODES
+from app.db.models import (
+    CALLER_AUTO,
+    CALLER_MODES,
+    GAME_CLASSIC,
+    GAME_ELIMINATION,
+    GAME_TYPES,
+)
 from app.db.session import get_db
 from app.domain.draws import BALL_MAX, BALL_MIN, TOTAL_BALLS
 from app.domain.patterns import PATTERNS, pattern_cell_groups
 from app.domain.rng import system_randomizer
-from app.services import audit, rounds
+from app.services import audit, elimination, rounds
 from app.services.events import get_broker
 
 router = APIRouter()
@@ -40,9 +46,11 @@ def round_topic(round_id: str) -> str:
 
 
 class CreateRoundRequest(BaseModel):
+    game_type: str = GAME_CLASSIC
     pattern: str = "any_line"
     label: str = Field(default="", max_length=64)
     caller_mode: str = CALLER_AUTO
+    numbers_per_ticket: int = Field(default=1, ge=1, le=5)
 
 
 class DrawRequest(BaseModel):
@@ -54,9 +62,13 @@ class DrawRequest(BaseModel):
 class RoundResponse(BaseModel):
     id: str
     join_code: str
+    game_type: str
     pattern: str
     caller_mode: str
     status: str
+    survivors: int | None = None
+    ticket_count: int | None = None
+    numbers_per_ticket: int | None = None
     label: str
     drawn: list[int]
     draw_count: int
@@ -107,6 +119,8 @@ async def create_round(
             pattern=payload.pattern,
             label=payload.label,
             caller_mode=payload.caller_mode,
+            game_type=payload.game_type,
+            numbers_per_ticket=payload.numbers_per_ticket,
         )
     except rounds.RoundError as exc:
         raise HTTPException(
@@ -202,6 +216,36 @@ async def draw_ball(
             "remaining": result.remaining,
         },
     )
+
+    if game.game_type == GAME_ELIMINATION:
+        effect = await elimination.apply_draw(
+            db, game=game, ball=result.ball, draw_count=result.sequence_no
+        )
+        if effect.knocked_out:
+            await get_broker().publish(
+                round_topic(round_id),
+                {
+                    "event": "players_eliminated",
+                    "ball": result.ball,
+                    "call": result.call,
+                    "draw_count": result.sequence_no,
+                    "players": [
+                        {"player_name": knock.player_name, "numbers": knock.numbers}
+                        for knock in effect.knocked_out
+                    ],
+                    "survivors": effect.survivors,
+                },
+            )
+        if effect.winners:
+            await get_broker().publish(
+                round_topic(round_id),
+                {
+                    "event": "elimination_over",
+                    "winners": effect.winners,
+                    "draw_count": result.sequence_no,
+                },
+            )
+
     return DrawResponse(
         ball=result.ball,
         call=result.call,
@@ -295,5 +339,9 @@ async def caller_screen(
         "total_balls": TOTAL_BALLS,
         "patterns": sorted(PATTERNS),
         "caller_modes": CALLER_MODES,
+        "game_types": GAME_TYPES,
+        "roster": await elimination.roster(db, game.id)
+        if game.game_type == GAME_ELIMINATION
+        else [],
     }
     return templates.TemplateResponse(request, "caller.html", context)

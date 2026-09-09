@@ -4,7 +4,9 @@
 {% block content %}
 <section class="card panel">
   <h1>This QR code is no longer usable</h1>
-  {% if reason == "used" %}
+  {% if reason == "full" %}
+  <p>{{ detail }}</p>
+  {% elif reason == "used" %}
   <p>This QR code has already been used. Each one works only once.</p>
   {% else %}
   <p>This QR code has expired.</p>

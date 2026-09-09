@@ -63,6 +63,29 @@ para siya ang magtingin. Ang tao ang judge, hindi ang server.
 Sa `auto`, huwag payagan ang host na pumili ng bola. Ang makakapili ng bola ay
 makakapili ng mananalo.
 
+## 1b. Elimination, ang laro ng party
+
+Bukod sa pattern bingo, may isa pang format na karaniwan sa PH party at
+madalas nakakaligtaan: **elimination**. May hawak na numero ang bawat bisita, at
+kapag natawag ang numero niya ay labas na siya. Ang huling natira ang panalo.
+
+Bakit hindi bagay dito ang 5x5 card: kung isang numero lang sa card ang
+kailangan para matanggal, sa tatlong bola pa lang ay tapos na ang lahat — 24 na
+numero kada card sa 75 na bola. Kaya **ticket** ang tamang artifact, hindi card:
+isa hanggang lima lang na numero kada bisita.
+
+Mga rule na dapat panatilihin:
+
+- **Unique ang numero kada round.** Ilagay ito sa DB constraint at hindi sa
+  Python check, kung hindi ay puwedeng maghati ng numero ang dalawang sabay na
+  sumali. Bunga nito: isa lang ang natatanggal kada bola, at mas madrama iyon.
+- **Kailangang alam ng app ang bawat bola.** Hindi puwede ang elimination sa
+  cards-only na caller mode dahil walang maihahambing.
+- **Walang ipipindot ang player.** Awtomatiko ang pagtanggal, kaya walang BINGO
+  button. Huwag magdagdag ng claim flow doon.
+- **Kapag ang huling natira ang natawag, panalo pa rin siya.** Siya ang
+  pinakamatagal na tumagal at wala nang susunod sa kanya.
+
 ## 2. PH-specific formats
 
 Iba't ibang product ang tinatawag na "bingo" sa Pilipinas. Alamin kung alin ang

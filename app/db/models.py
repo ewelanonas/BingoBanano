@@ -51,6 +51,14 @@ CALLER_MANUAL = "manual"
 CALLER_OFFLINE = "offline"
 CALLER_MODES = (CALLER_AUTO, CALLER_MANUAL, CALLER_OFFLINE)
 
+# Anong laro.
+#   classic     - 75-ball pattern bingo, may 5x5 cards
+#   elimination - may hawak na kaunting numero ang bisita; kapag natawag ang
+#                 numero niya ay labas na siya. Ang huling natira ang panalo.
+GAME_CLASSIC = "classic"
+GAME_ELIMINATION = "elimination"
+GAME_TYPES = (GAME_CLASSIC, GAME_ELIMINATION)
+
 
 def _new_id() -> str:
     return uuid.uuid4().hex
@@ -98,7 +106,11 @@ class GameRound(Base):
 
     id: Mapped[str] = mapped_column(String(32), primary_key=True, default=_new_id)
     join_code: Mapped[str] = mapped_column(String(12), unique=True, index=True)
+    game_type: Mapped[str] = mapped_column(String(16), default=GAME_CLASSIC)
+    # Ginagamit lang sa `classic`.
     pattern: Mapped[str] = mapped_column(String(32))
+    # Ginagamit lang sa `elimination`: ilang numero ang hawak ng bawat bisita.
+    numbers_per_ticket: Mapped[int] = mapped_column(Integer, default=1)
     caller_mode: Mapped[str] = mapped_column(String(16), default=CALLER_AUTO)
     status: Mapped[str] = mapped_column(String(16), default=ROUND_OPEN, index=True)
     label: Mapped[str] = mapped_column(String(64), default="")
@@ -223,6 +235,54 @@ class BingoCard(Base):
     session: Mapped[PairingSession] = relationship(back_populates="cards")
 
     __table_args__ = (UniqueConstraint("session_id", "serial", name="uq_card_session_serial"),)
+
+
+class EliminationTicket(Base):
+    """Ang hawak ng bisita sa elimination round.
+
+    Ang mga numero ay nasa `TicketNumber` at hindi dito, para may unique
+    constraint na nagbabantay na walang dalawang bisitang parehong numero.
+    """
+
+    __tablename__ = "elimination_ticket"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=_new_id)
+    round_id: Mapped[str] = mapped_column(String(32), ForeignKey("game_round.id"), index=True)
+    player_id: Mapped[str] = mapped_column(String(32), ForeignKey("player.id"), index=True)
+    created_at: Mapped[datetime] = mapped_column(UtcDateTime())
+    eliminated_at: Mapped[datetime | None] = mapped_column(UtcDateTime(), default=None)
+    eliminated_by_ball: Mapped[int | None] = mapped_column(Integer, default=None)
+    eliminated_at_draw: Mapped[int | None] = mapped_column(Integer, default=None)
+    is_winner: Mapped[bool] = mapped_column(Boolean, default=False)
+
+    numbers: Mapped[list[TicketNumber]] = relationship(
+        back_populates="ticket", order_by="TicketNumber.number"
+    )
+
+    __table_args__ = (Index("ix_ticket_round_eliminated", "round_id", "eliminated_at"),)
+
+
+class TicketNumber(Base):
+    """Isang numerong hawak ng isang ticket.
+
+    Ang unique constraint sa `(round_id, number)` ang tunay na panangga: hindi
+    puwedeng maibigay ang parehong numero sa dalawang bisita, kahit sabay silang
+    sumali. Ito rin ang index na ginagamit sa paghanap kung sino ang tatanggalin
+    kapag lumabas ang isang bola.
+    """
+
+    __tablename__ = "ticket_number"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=_new_id)
+    round_id: Mapped[str] = mapped_column(String(32), ForeignKey("game_round.id"), index=True)
+    ticket_id: Mapped[str] = mapped_column(
+        String(32), ForeignKey("elimination_ticket.id"), index=True
+    )
+    number: Mapped[int] = mapped_column(Integer)
+
+    ticket: Mapped[EliminationTicket] = relationship(back_populates="numbers")
+
+    __table_args__ = (UniqueConstraint("round_id", "number", name="uq_ticket_round_number"),)
 
 
 class AuditEvent(Base):

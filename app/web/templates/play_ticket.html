@@ -1,0 +1,114 @@
+{% extends "base.html" %}
+{% block title %}Your number - {{ round.join_code }}{% endblock %}
+
+{% block content %}
+<section class="panel">
+  <h1>Hi {{ player_name }}</h1>
+  <p class="muted">
+    Round <span class="join-code">{{ round.join_code }}</span> &middot;
+    elimination
+  </p>
+
+  <div id="verdict" class="verdict" role="status" aria-live="assertive"
+       data-state="{% if is_winner %}winner{% elif is_out %}out{% else %}in{% endif %}">
+    {% if is_winner %}You win! Last one standing.
+    {% elif is_out %}You're out. {{ out_on }} knocked you off.
+    {% else %}You're still in.
+    {% endif %}
+  </div>
+
+  <p class="muted">
+    {% if numbers|length > 1 %}
+      These are your numbers. If any of them is called, you're out.
+    {% else %}
+      This is your number. If it's called, you're out.
+    {% endif %}
+  </p>
+
+  <div class="ticket-numbers">
+    {% for number in numbers %}
+    <div class="ticket-number" id="number-{{ number }}" data-ball="{{ number }}">
+      {{ number }}
+    </div>
+    {% endfor %}
+  </div>
+
+  <div class="call-strip">
+    <div class="call-big" id="last-call" aria-live="polite">
+      {{ round.last_call or "--" }}
+    </div>
+    <dl class="call-meta">
+      <dt>Called</dt><dd id="draw-count">{{ round.draw_count }}</dd>
+      <dt>Still in</dt><dd id="survivors">{{ round.survivors }}</dd>
+    </dl>
+  </div>
+
+  <p id="message" class="status" role="status" aria-live="polite"></p>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  const TOKEN = {{ token | tojson }};
+  const MY_NUMBERS = {{ numbers | tojson }};
+  const MY_NAME = {{ player_name | tojson }};
+
+  const verdictEl = document.getElementById("verdict");
+  const lastCallEl = document.getElementById("last-call");
+  const drawCountEl = document.getElementById("draw-count");
+  const survivorsEl = document.getElementById("survivors");
+  const messageEl = document.getElementById("message");
+
+  function setVerdict(state, text) {
+    verdictEl.dataset.state = state;
+    verdictEl.textContent = text;
+  }
+
+  function markHit(ball) {
+    const cell = document.getElementById(`number-${ball}`);
+    if (cell) { cell.classList.add("hit"); }
+  }
+
+  const scheme = location.protocol === "https:" ? "wss:" : "ws:";
+  const socket = new WebSocket(`${scheme}//${location.host}/api/play/${TOKEN}/events`);
+
+  socket.addEventListener("message", (event) => {
+    const payload = JSON.parse(event.data);
+
+    if (payload.event === "snapshot") {
+      for (const ball of payload.drawn) {
+        if (MY_NUMBERS.includes(ball)) { markHit(ball); }
+      }
+      lastCallEl.textContent = payload.last_call || "--";
+      drawCountEl.textContent = payload.draw_count;
+      survivorsEl.textContent = payload.survivors;
+    } else if (payload.event === "ball_drawn") {
+      lastCallEl.textContent = payload.call;
+      drawCountEl.textContent = payload.sequence_no;
+      if (MY_NUMBERS.includes(payload.ball)) { markHit(payload.ball); }
+    } else if (payload.event === "players_eliminated") {
+      survivorsEl.textContent = payload.survivors;
+      const me = payload.players.find((p) => p.player_name === MY_NAME);
+      if (me) {
+        setVerdict("out", `You're out. ${payload.call} knocked you off.`);
+      } else {
+        const names = payload.players.map((p) => p.player_name).join(", ");
+        messageEl.textContent = `${payload.call} knocked out ${names}.`;
+      }
+    } else if (payload.event === "elimination_over") {
+      survivorsEl.textContent = "0";
+      if (payload.winners.includes(MY_NAME)) {
+        setVerdict("winner", payload.winners.length > 1
+          ? "You win, tied with someone!"
+          : "You win! Last one standing.");
+      } else {
+        messageEl.textContent = `${payload.winners.join(" and ")} won this round.`;
+      }
+    }
+  });
+
+  socket.addEventListener("close", () => {
+    messageEl.textContent = "Disconnected. Refresh to catch up.";
+  });
+</script>
+{% endblock %}

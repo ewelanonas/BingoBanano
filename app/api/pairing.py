@@ -29,11 +29,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import templates
 from app.api.security import enforce_rate_limit, require_operator
 from app.config import Settings, get_settings
-from app.db.models import PAIRING_PENDING, ROUND_OPEN, Player
+from app.db.models import GAME_ELIMINATION, PAIRING_PENDING, ROUND_OPEN, Player
 from app.db.session import get_db
 from app.domain.cards import Card
 from app.domain.rng import new_play_token, system_randomizer
-from app.services import audit, issuance, rounds
+from app.services import audit, elimination, issuance, rounds
 from app.services import pairing as pairing_service
 from app.services.events import get_broker
 from app.services.identity import utcnow
@@ -337,10 +337,23 @@ async def pair_claim(
 
     try:
         claimed = await pairing_service.consume(db, nonce=nonce, player_id=player.id)
-        cards = await issuance.issue_cards(
-            db, pairing=claimed, player=player, rng=system_randomizer()
-        )
-    except (pairing_service.PairingUnavailableError, issuance.IssuanceError) as exc:
+        game = await rounds.get_round(db, claimed.round_id)
+        if game is not None and game.game_type == GAME_ELIMINATION:
+            # Elimination: numero ang ibinibigay, hindi 5x5 card.
+            ticket_numbers = await elimination.issue_ticket(
+                db, game=game, player=player, rng=system_randomizer()
+            )
+            cards = []
+        else:
+            ticket_numbers = []
+            cards = await issuance.issue_cards(
+                db, pairing=claimed, player=player, rng=system_randomizer()
+            )
+    except (
+        pairing_service.PairingUnavailableError,
+        issuance.IssuanceError,
+        elimination.EliminationError,
+    ) as exc:
         await db.rollback()
         await audit.record(
             db,
@@ -350,6 +363,13 @@ async def pair_claim(
             detail={"reason": type(exc).__name__},
         )
         await db.commit()
+        if isinstance(exc, elimination.EliminationError):
+            return templates.TemplateResponse(
+                request,
+                "pair_unavailable.html",
+                {"reason": "full", "detail": str(exc)},
+                status_code=status.HTTP_409_CONFLICT,
+            )
         return templates.TemplateResponse(
             request,
             "pair_unavailable.html",
@@ -363,12 +383,12 @@ async def pair_claim(
         outcome=audit.OUTCOME_OK,
         nonce=nonce,
         player_id=player.id,
-        detail={"cards": len(cards)},
+        detail={"cards": len(cards), "numbers": len(ticket_numbers)},
     )
     await db.commit()
 
-    game = await rounds.get_round(db, claimed.round_id)
     pattern = game.pattern if game else "any_line"
+    is_elimination = bool(ticket_numbers)
 
     await get_broker().publish(
         f"pairing:{claimed.id}",
@@ -379,6 +399,7 @@ async def pair_claim(
             "player_name": player.given_name,
             "pattern": pattern,
             "cards": [_card_payload(card) for card in cards],
+            "numbers": ticket_numbers,
         },
     )
 
@@ -389,6 +410,8 @@ async def pair_claim(
             "player_name": player.given_name,
             "pattern": pattern,
             "cards": [_card_payload(card) for card in cards],
+            "numbers": ticket_numbers,
+            "is_elimination": is_elimination,
             # Dito na siya mananatili habang tumatakbo ang laro.
             "play_url": f"/play/{player.play_token}",
         },
