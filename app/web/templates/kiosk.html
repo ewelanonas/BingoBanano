@@ -1,0 +1,194 @@
+{% extends "base.html" %}
+{% block title %}Host lobby - BingoBanano{% endblock %}
+
+{% block header_extra %}
+<form method="post" action="/operator/logout" class="inline">
+  <button type="submit" class="btn ghost">Sign out</button>
+</form>
+{% endblock %}
+
+{% block content %}
+<section class="panel">
+  <h1>Host lobby</h1>
+  <p class="muted">
+    Create a round, then generate a QR for each guest. Once everyone has
+    joined, open the caller screen and start drawing.
+  </p>
+
+  <form id="round-form" class="row">
+    <div class="field">
+      <label for="pattern">Pattern</label>
+      <select id="pattern" name="pattern">
+        {% for name in patterns %}
+        <option value="{{ name }}" {% if name == "any_line" %}selected{% endif %}>
+          {{ name.replace("_", " ") }}
+        </option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="field">
+      <label for="label">Round name</label>
+      <input id="label" name="label" type="text" maxlength="64" placeholder="Living room game">
+    </div>
+    <button type="submit" class="btn primary">Create round</button>
+  </form>
+
+  <p class="hint">QR base URL: <code>{{ public_base_url }}</code></p>
+  <p id="status" class="status" role="status" aria-live="polite"></p>
+  <div id="warnings" class="warnings"></div>
+</section>
+
+<section class="panel" id="round-panel" hidden>
+  <h2>Round <span id="join-code" class="join-code"></span></h2>
+  <p class="muted">
+    Pattern: <strong id="round-pattern"></strong> &middot;
+    <span id="round-tally">0 players, 0 cards</span>
+  </p>
+
+  <div class="row">
+    <div class="field">
+      <label for="card_count">Cards per guest</label>
+      <input id="card_count" name="card_count" type="number" min="1"
+             max="{{ max_card_count }}" value="{{ default_card_count }}">
+    </div>
+    <button id="qr-button" type="button" class="btn primary">Generate QR</button>
+    <a id="caller-link" class="btn ghost" href="#">Open caller screen</a>
+  </div>
+
+  <div id="qr-wrap" class="qr-wrap" hidden>
+    <img id="qr-image" alt="QR code for joining the round" width="260" height="260">
+    <p class="muted">Expires in <span id="countdown">--</span>s</p>
+  </div>
+
+  <ul id="joined" class="joined"></ul>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  const CSRF_TOKEN = {{ csrf_token | tojson }};
+  const statusEl = document.getElementById("status");
+  const warningsEl = document.getElementById("warnings");
+  const roundPanel = document.getElementById("round-panel");
+  const joinCodeEl = document.getElementById("join-code");
+  const roundPatternEl = document.getElementById("round-pattern");
+  const roundTallyEl = document.getElementById("round-tally");
+  const callerLink = document.getElementById("caller-link");
+  const qrWrap = document.getElementById("qr-wrap");
+  const qrImage = document.getElementById("qr-image");
+  const countdownEl = document.getElementById("countdown");
+  const joinedEl = document.getElementById("joined");
+
+  let round = null;
+  let socket = null;
+  let timer = null;
+
+  const setStatus = (text) => { statusEl.textContent = text; };
+
+  function renderWarnings(items) {
+    warningsEl.replaceChildren();
+    for (const item of items) {
+      const p = document.createElement("p");
+      p.className = "alert";
+      p.setAttribute("role", "alert");
+      p.textContent = item;
+      warningsEl.append(p);
+    }
+  }
+
+  function addJoined(name, cards) {
+    const li = document.createElement("li");
+    li.textContent = `${name} - ${cards} card${cards > 1 ? "s" : ""}`;
+    joinedEl.append(li);
+  }
+
+  async function refreshTally() {
+    const response = await fetch(`/api/rounds/${round.id}`, {
+      headers: { "X-CSRF-Token": CSRF_TOKEN },
+    });
+    if (!response.ok) { return; }
+    const data = await response.json();
+    roundTallyEl.textContent =
+      `${data.player_count} players, ${data.card_count} cards`;
+  }
+
+  function startCountdown(expiresAt) {
+    clearInterval(timer);
+    timer = setInterval(() => {
+      const left = Math.max(0, Math.round((new Date(expiresAt) - new Date()) / 1000));
+      countdownEl.textContent = String(left);
+      if (left === 0) {
+        clearInterval(timer);
+        qrWrap.hidden = true;
+      }
+    }, 500);
+  }
+
+  function listenPairing(pairingId) {
+    if (socket) { socket.close(); }
+    const scheme = location.protocol === "https:" ? "wss:" : "ws:";
+    socket = new WebSocket(`${scheme}//${location.host}/api/pairing/${pairingId}/events`);
+    socket.addEventListener("message", (event) => {
+      const payload = JSON.parse(event.data);
+      if (payload.event === "cards_issued") {
+        clearInterval(timer);
+        qrWrap.hidden = true;
+        setStatus(`${payload.player_name} joined.`);
+        addJoined(payload.player_name, payload.cards.length);
+        refreshTally();
+        socket.close();
+      }
+    });
+  }
+
+  document.getElementById("round-form").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    setStatus("Creating round...");
+    const response = await fetch("/api/rounds", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-CSRF-Token": CSRF_TOKEN },
+      body: JSON.stringify({
+        pattern: document.getElementById("pattern").value,
+        label: document.getElementById("label").value,
+      }),
+    });
+    if (!response.ok) {
+      const problem = await response.json().catch(() => ({}));
+      setStatus(problem.detail || "Could not create the round.");
+      return;
+    }
+    round = await response.json();
+    joinCodeEl.textContent = round.join_code;
+    roundPatternEl.textContent = round.pattern.replace(/_/g, " ");
+    callerLink.href = `/caller/${round.id}`;
+    roundPanel.hidden = false;
+    joinedEl.replaceChildren();
+    setStatus("Round ready. Generate a QR for your first guest.");
+  });
+
+  document.getElementById("qr-button").addEventListener("click", async () => {
+    setStatus("Generating QR...");
+    const response = await fetch("/api/pairing", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-CSRF-Token": CSRF_TOKEN },
+      body: JSON.stringify({
+        round_id: round.id,
+        card_count: Number(document.getElementById("card_count").value),
+        kiosk_label: "host-lobby",
+      }),
+    });
+    if (!response.ok) {
+      const problem = await response.json().catch(() => ({}));
+      setStatus(problem.detail || "Could not generate the QR.");
+      return;
+    }
+    const data = await response.json();
+    qrImage.src = data.qr_data_uri;
+    qrWrap.hidden = false;
+    renderWarnings(data.warnings || []);
+    setStatus("Waiting for a scan...");
+    startCountdown(data.expires_at);
+    listenPairing(data.id);
+  });
+</script>
+{% endblock %}

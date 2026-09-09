@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block title %}Host sign in - BingoBanano{% endblock %}
+
+{% block content %}
+<section class="card panel">
+  <h1>Host sign in</h1>
+  <p class="muted">
+    Enter the operator key from your <code>.env</code> file. It is stored in an
+    HttpOnly cookie, so the page's JavaScript never sees it.
+  </p>
+
+  {% if error %}
+  <p class="alert" role="alert">That key is not correct.</p>
+  {% endif %}
+
+  <form method="post" action="/operator/session" class="stack">
+    <div class="field">
+      <label for="api_key">Operator key</label>
+      <input id="api_key" name="api_key" type="password" required autocomplete="current-password"
+             autofocus>
+    </div>
+    <button type="submit" class="btn primary">Sign in</button>
+  </form>
+</section>
+{% endblock %}

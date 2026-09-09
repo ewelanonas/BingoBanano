@@ -1,0 +1,129 @@
+{% extends "base.html" %}
+{% block title %}Your cards - {{ round.join_code }}{% endblock %}
+
+{% block content %}
+<section class="panel">
+  <h1>Hi {{ player_name }}</h1>
+  <p class="muted">
+    Round <span class="join-code">{{ round.join_code }}</span> &middot;
+    pattern <strong>{{ round.pattern.replace("_", " ") }}</strong>
+  </p>
+
+  <div class="call-strip">
+    <div class="call-big" id="last-call" aria-live="polite">
+      {{ round.last_call or "--" }}
+    </div>
+    <dl class="call-meta">
+      <dt>Drawn</dt><dd id="draw-count">{{ round.draw_count }}</dd>
+      <dt>Needed</dt><dd id="missing">--</dd>
+    </dl>
+  </div>
+
+  <button id="bingo-button" type="button" class="btn bingo">BINGO!</button>
+  <p id="claim-message" class="status" role="status" aria-live="polite"></p>
+
+  <div class="card-list">
+    {% for card in cards %}
+    <figure class="bingo-card" data-serial="{{ card.serial }}">
+      <figcaption>{{ card.serial }}</figcaption>
+      <table class="grid">
+        <caption class="sr-only">Bingo card {{ card.serial }}</caption>
+        <thead>
+          <tr>
+            {% for letter in "BINGO" %}<th scope="col">{{ letter }}</th>{% endfor %}
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in card.rows %}
+          <tr>
+            {% for value in row %}
+            {% if value == 0 %}
+            <td class="free marked">
+              <span aria-hidden="true">FREE</span>
+              <span class="sr-only">Free space, marked</span>
+            </td>
+            {% else %}
+            <td data-ball="{{ value }}">{{ value }}</td>
+            {% endif %}
+            {% endfor %}
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </figure>
+    {% endfor %}
+  </div>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  const TOKEN = {{ token | tojson }};
+  const PATTERN_GROUPS = {{ pattern_groups | tojson }};
+  const CARDS = {{ cards | tojson }};
+
+  const lastCallEl = document.getElementById("last-call");
+  const drawCountEl = document.getElementById("draw-count");
+  const missingEl = document.getElementById("missing");
+  const messageEl = document.getElementById("claim-message");
+  const bingoButton = document.getElementById("bingo-button");
+
+  const drawn = new Set();
+
+  function markBall(ball) {
+    drawn.add(ball);
+    for (const cell of document.querySelectorAll(`td[data-ball="${ball}"]`)) {
+      cell.classList.add("marked");
+    }
+  }
+
+  // This count is presentation only. The server still decides whether a claim
+  // is a real BINGO.
+  function updateMissing() {
+    let best = 99;
+    for (const card of CARDS) {
+      for (const group of PATTERN_GROUPS) {
+        let gap = 0;
+        for (const cell of group) {
+          const value = card.numbers[cell];
+          if (value !== 0 && !drawn.has(value)) { gap += 1; }
+        }
+        best = Math.min(best, gap);
+      }
+    }
+    missingEl.textContent = best === 0 ? "0 - press BINGO" : String(best);
+    bingoButton.classList.toggle("ready", best === 0);
+  }
+
+  bingoButton.addEventListener("click", async () => {
+    bingoButton.disabled = true;
+    const response = await fetch(`/api/play/${TOKEN}/bingo`, { method: "POST" });
+    const data = await response.json().catch(() => ({}));
+    messageEl.textContent = data.message || data.detail || "Could not send the claim.";
+    if (!data.verified) {
+      setTimeout(() => { bingoButton.disabled = false; }, 1500);
+    }
+  });
+
+  const scheme = location.protocol === "https:" ? "wss:" : "ws:";
+  const socket = new WebSocket(`${scheme}//${location.host}/api/play/${TOKEN}/events`);
+
+  socket.addEventListener("message", (event) => {
+    const payload = JSON.parse(event.data);
+    if (payload.event === "snapshot") {
+      for (const ball of payload.drawn) { markBall(ball); }
+      lastCallEl.textContent = payload.last_call || "--";
+      drawCountEl.textContent = payload.draw_count;
+      updateMissing();
+    } else if (payload.event === "ball_drawn") {
+      markBall(payload.ball);
+      lastCallEl.textContent = payload.call;
+      drawCountEl.textContent = payload.sequence_no;
+      updateMissing();
+    } else if (payload.event === "round_won") {
+      messageEl.textContent =
+        `${payload.player_name} won with ${payload.card_serial} on ball ${payload.draw_count}.`;
+    }
+  });
+</script>
+{% endblock %}

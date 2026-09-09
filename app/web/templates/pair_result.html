@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% from "_cards.html" import card_grid %}
+{% block title %}Your cards - BingoBanano{% endblock %}
+
+{% block content %}
+<section class="panel">
+  <h1>You're in, {{ player_name }}</h1>
+  <p class="muted">
+    This round's pattern: <strong>{{ pattern.replace("_", " ") }}</strong>.
+  </p>
+  <p>
+    <a class="btn primary" href="{{ play_url }}">Open your live board</a>
+  </p>
+  <p class="hint">
+    That is where every ball appears and where the BINGO button lives. Bookmark
+    the link in case the tab closes.
+  </p>
+  <div class="card-list">
+    {% for card in cards %}{{ card_grid(card) }}{% endfor %}
+  </div>
+</section>
+{% endblock %}

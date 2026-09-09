@@ -1,0 +1,288 @@
+:root {
+  --bg: #f6f7f9;
+  --panel: #ffffff;
+  --ink: #101828;
+  --muted: #5b6472;
+  --line: #d7dce4;
+  --accent: #1f6feb;
+  --accent-ink: #ffffff;
+  --alert-bg: #fff4e5;
+  --alert-ink: #7a3e00;
+  --free: #eef4ff;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #14161a;
+    --panel: #1c1f25;
+    --ink: #eef1f6;
+    --muted: #a4adbb;
+    --line: #333944;
+    --accent: #5b9bff;
+    --accent-ink: #0b1220;
+    --alert-bg: #3a2c14;
+    --alert-ink: #ffd9a0;
+    --free: #232c3d;
+  }
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  font: 16px/1.55 system-ui, "Segoe UI", Roboto, sans-serif;
+  background: var(--bg);
+  color: var(--ink);
+}
+
+.site-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.9rem 1.25rem;
+  border-bottom: 1px solid var(--line);
+  background: var(--panel);
+}
+
+.brand { font-weight: 700; text-decoration: none; color: var(--ink); letter-spacing: -0.01em; }
+
+main { max-width: 62rem; margin: 0 auto; padding: 1.5rem 1.25rem 3rem; }
+
+.panel {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 1.4rem;
+}
+
+.card.panel { max-width: 32rem; margin-inline: auto; }
+
+h1 { font-size: 1.35rem; margin: 0 0 0.4rem; }
+
+.muted { color: var(--muted); margin: 0 0 1rem; }
+.hint { color: var(--muted); font-size: 0.85rem; margin: 0.3rem 0 0; }
+
+.stack { display: grid; gap: 1rem; }
+.row { display: flex; flex-wrap: wrap; gap: 1rem; align-items: end; }
+.inline { margin: 0; }
+
+.field { display: grid; gap: 0.35rem; }
+.field.checkbox { display: flex; gap: 0.6rem; align-items: start; }
+.field.checkbox label { font-size: 0.92rem; color: var(--muted); }
+
+label { font-weight: 600; font-size: 0.9rem; }
+
+input, select {
+  font: inherit;
+  padding: 0.6rem 0.7rem;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--bg);
+  color: var(--ink);
+  min-width: 12rem;
+}
+
+input:focus-visible, select:focus-visible, .btn:focus-visible, a:focus-visible {
+  outline: 3px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.btn {
+  font: inherit;
+  font-weight: 600;
+  padding: 0.62rem 1.1rem;
+  border-radius: 9px;
+  border: 1px solid transparent;
+  cursor: pointer;
+}
+
+.btn.primary { background: var(--accent); color: var(--accent-ink); }
+.btn.ghost { background: transparent; border-color: var(--line); color: var(--ink); }
+
+.alert {
+  background: var(--alert-bg);
+  color: var(--alert-ink);
+  border-radius: 9px;
+  padding: 0.7rem 0.85rem;
+  margin: 0 0 1rem;
+  font-size: 0.92rem;
+}
+
+.status { margin: 1.1rem 0 0; font-weight: 600; min-height: 1.55em; }
+.warnings { margin-top: 0.6rem; }
+
+.qr-wrap { margin-top: 1.2rem; text-align: center; }
+.qr-wrap img {
+  width: 260px;
+  height: 260px;
+  image-rendering: pixelated;
+  background: #fff;
+  padding: 10px;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+}
+
+.card-list { display: flex; flex-wrap: wrap; gap: 1rem; margin-top: 1.3rem; }
+
+.bingo-card {
+  margin: 0;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 0.7rem;
+  background: var(--panel);
+}
+
+.bingo-card figcaption {
+  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  font-size: 0.8rem;
+  color: var(--muted);
+  margin-bottom: 0.45rem;
+}
+
+table.grid { border-collapse: collapse; }
+
+table.grid th, table.grid td {
+  width: 2.7rem;
+  height: 2.7rem;
+  text-align: center;
+  border: 1px solid var(--line);
+  font-variant-numeric: tabular-nums;
+}
+
+table.grid th { background: var(--accent); color: var(--accent-ink); }
+table.grid td.free { background: var(--free); font-size: 0.62rem; letter-spacing: 0.04em; }
+
+.site-footer {
+  border-top: 1px solid var(--line);
+  padding: 1rem 1.25rem;
+  color: var(--muted);
+  font-size: 0.85rem;
+  background: var(--panel);
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px; height: 1px;
+  padding: 0; margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* --- Draw engine: caller board at live player board --- */
+
+.join-code {
+  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  letter-spacing: 0.12em;
+  background: var(--free);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 0.1em 0.4em;
+}
+
+.section-title { font-size: 1.05rem; margin: 1.6rem 0 0.6rem; }
+
+.call-strip {
+  display: flex;
+  align-items: center;
+  gap: 1.4rem;
+  flex-wrap: wrap;
+  margin: 1.2rem 0;
+  padding: 1rem 1.2rem;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--bg);
+}
+
+.call-big {
+  font-size: clamp(2.6rem, 9vw, 4.4rem);
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+  min-width: 6.5ch;
+  text-align: center;
+}
+
+.call-meta {
+  display: grid;
+  grid-template-columns: auto auto;
+  gap: 0.15rem 0.8rem;
+  margin: 0;
+  font-size: 0.9rem;
+}
+
+.call-meta dt { color: var(--muted); }
+.call-meta dd { margin: 0; font-weight: 700; font-variant-numeric: tabular-nums; }
+
+.controls { align-items: center; }
+.controls .field.checkbox { align-items: center; gap: 0.4rem; }
+input.tiny { min-width: 4.5rem; }
+
+.board { display: flex; gap: 0.5rem; flex-wrap: wrap; }
+.board-column { display: grid; gap: 0.25rem; }
+
+.board-letter {
+  font-weight: 800;
+  text-align: center;
+  background: var(--accent);
+  color: var(--accent-ink);
+  border-radius: 7px;
+  padding: 0.25rem 0;
+}
+
+.board-ball {
+  width: 2.5rem;
+  padding: 0.28rem 0;
+  text-align: center;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  font-size: 0.85rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+}
+
+.board-ball.drawn {
+  background: var(--accent);
+  color: var(--accent-ink);
+  border-color: var(--accent);
+  font-weight: 700;
+}
+
+table.grid td.marked {
+  background: var(--accent);
+  color: var(--accent-ink);
+  font-weight: 700;
+}
+
+table.grid td.free.marked { background: var(--free); color: var(--ink); }
+
+.btn.bingo {
+  display: block;
+  width: 100%;
+  margin: 0.4rem 0 0.2rem;
+  padding: 1rem;
+  font-size: 1.3rem;
+  letter-spacing: 0.08em;
+  background: var(--line);
+  color: var(--muted);
+}
+
+.btn.bingo.ready {
+  background: var(--accent);
+  color: var(--accent-ink);
+}
+
+.btn.bingo:disabled { opacity: 0.6; cursor: not-allowed; }
+
+.winner {
+  margin: 1rem 0 0;
+  padding: 0.9rem 1rem;
+  border-radius: 10px;
+  background: var(--accent);
+  color: var(--accent-ink);
+  font-weight: 700;
+}
+
+.joined { margin: 1.2rem 0 0; padding-left: 1.1rem; color: var(--muted); }
+.joined li { margin: 0.2rem 0; }

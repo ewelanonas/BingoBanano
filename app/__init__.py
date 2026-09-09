@@ -1,0 +1,1 @@
+"""BingoBanano application package."""

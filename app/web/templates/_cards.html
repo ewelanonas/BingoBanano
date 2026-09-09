@@ -1,0 +1,32 @@
+{% macro card_grid(card) -%}
+<figure class="bingo-card">
+  <figcaption>
+    <span class="serial">{{ card.serial }}</span>
+  </figcaption>
+  <table class="grid">
+    <caption class="sr-only">Bingo card {{ card.serial }}</caption>
+    <thead>
+      <tr>
+        <th scope="col">B</th>
+        <th scope="col">I</th>
+        <th scope="col">N</th>
+        <th scope="col">G</th>
+        <th scope="col">O</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in card.rows %}
+      <tr>
+        {% for value in row %}
+        {% if value == 0 %}
+        <td class="free"><span aria-hidden="true">FREE</span><span class="sr-only">Free space</span></td>
+        {% else %}
+        <td>{{ value }}</td>
+        {% endif %}
+        {% endfor %}
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</figure>
+{%- endmacro %}

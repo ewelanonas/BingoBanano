@@ -1,0 +1,12 @@
+# Normalize line endings para hindi maging noise sa ibang machine.
+* text=auto eol=lf
+
+# Ang PowerShell ay mas mabait sa CRLF sa Windows.
+*.ps1 text eol=crlf
+
+# Binary o generated: huwag hawakan.
+uv.lock text eol=lf
+*.png binary
+*.jpg binary
+*.webp binary
+*.db binary

@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block title %}Get your cards - BingoBanano{% endblock %}
+
+{% block content %}
+<section class="card panel">
+  <h1>Get your cards</h1>
+  <p class="muted">
+    {{ card_count }} card{{ "s" if card_count > 1 else "" }} for the
+    <strong>{{ pattern.replace("_", " ") }}</strong> pattern.
+  </p>
+
+  {% if error %}
+  <p class="alert" role="alert">{{ error }}</p>
+  {% endif %}
+
+  <form method="post" action="/pair/{{ nonce }}/claim" class="stack">
+    <div class="field">
+      <label for="given_name">Your nickname</label>
+      <input id="given_name" name="given_name" type="text" required maxlength="64"
+             autocomplete="nickname" autofocus>
+      <p class="hint">This is the name shown on the caller screen when you win.</p>
+    </div>
+
+    <button type="submit" class="btn primary">Generate my cards</button>
+  </form>
+</section>
+{% endblock %}

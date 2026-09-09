@@ -1,0 +1,44 @@
+[project]
+name = "bingobanano"
+version = "0.1.0"
+description = "PAGCOR-aware 75-ball bingo card issuance with QR device pairing"
+requires-python = ">=3.13"
+dependencies = [
+    "fastapi==0.141.1",
+    "uvicorn[standard]==0.52.4",
+    "jinja2==3.1.6",
+    "python-multipart==0.0.32",
+    "sqlalchemy[asyncio]==2.0.52",
+    "aiosqlite==0.22.1",
+    "segno==1.6.6",
+    "pydantic-settings==2.15.0",
+]
+
+[dependency-groups]
+dev = [
+    "pytest==9.1.1",
+    "pytest-asyncio==1.4.0",
+    "httpx==0.28.1",
+    "ruff==0.16.6",
+    "mypy==2.3.1",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "S", "ASYNC"]
+ignore = ["S101"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["S105", "S106"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[tool.mypy]
+python_version = "3.13"
+strict = true
+files = ["app/domain"]

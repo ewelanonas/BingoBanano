@@ -1,0 +1,174 @@
+{% extends "base.html" %}
+{% block title %}Caller - {{ round.join_code }}{% endblock %}
+
+{% block header_extra %}
+<a class="btn ghost" href="/kiosk">Lobby</a>
+{% endblock %}
+
+{% block content %}
+<section class="panel">
+  <h1>
+    Caller <span class="join-code">{{ round.join_code }}</span>
+  </h1>
+  <p class="muted">
+    Pattern: <strong>{{ round.pattern.replace("_", " ") }}</strong> &middot;
+    {{ round.player_count }} players &middot; {{ round.card_count }} cards
+  </p>
+
+  <div class="call-strip">
+    <div class="call-big" id="last-call" aria-live="assertive">
+      {{ round.last_call or "--" }}
+    </div>
+    <dl class="call-meta">
+      <dt>Drawn</dt><dd id="draw-count">{{ round.draw_count }}</dd>
+      <dt>Left</dt><dd id="remaining">{{ round.remaining }}</dd>
+      <dt>Status</dt><dd id="round-status">{{ round.status }}</dd>
+    </dl>
+  </div>
+
+  <div class="row controls">
+    <button id="start-button" type="button" class="btn primary"
+            {% if round.status != "open" %}disabled{% endif %}>
+      Start round
+    </button>
+    <button id="draw-button" type="button" class="btn primary"
+            {% if round.status != "drawing" %}disabled{% endif %}>
+      Draw next ball
+    </button>
+    <div class="field checkbox">
+      <input id="auto-draw" type="checkbox">
+      <label for="auto-draw">Auto-draw every</label>
+      <input id="auto-seconds" type="number" min="2" max="30" value="6" class="tiny">
+      <span class="muted">s</span>
+    </div>
+    <button id="close-button" type="button" class="btn ghost">Close round</button>
+  </div>
+
+  <p id="status" class="status" role="status" aria-live="polite"></p>
+  <div id="winner" class="winner" hidden></div>
+
+  <h2 class="section-title">Board</h2>
+  <div class="board" id="board">
+    {% for letter in "BINGO" %}
+    <div class="board-column">
+      <div class="board-letter">{{ letter }}</div>
+      {% for ball in range(loop.index0 * 15 + 1, loop.index0 * 15 + 16) %}
+      <div class="board-ball" id="ball-{{ ball }}">{{ ball }}</div>
+      {% endfor %}
+    </div>
+    {% endfor %}
+  </div>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  const CSRF_TOKEN = {{ csrf_token | tojson }};
+  const ROUND_ID = {{ round.id | tojson }};
+  const headers = { "Content-Type": "application/json", "X-CSRF-Token": CSRF_TOKEN };
+
+  const lastCallEl = document.getElementById("last-call");
+  const drawCountEl = document.getElementById("draw-count");
+  const remainingEl = document.getElementById("remaining");
+  const statusTextEl = document.getElementById("round-status");
+  const statusEl = document.getElementById("status");
+  const winnerEl = document.getElementById("winner");
+  const startButton = document.getElementById("start-button");
+  const drawButton = document.getElementById("draw-button");
+  const closeButton = document.getElementById("close-button");
+  const autoDraw = document.getElementById("auto-draw");
+  const autoSeconds = document.getElementById("auto-seconds");
+
+  let autoTimer = null;
+  const setStatus = (text) => { statusEl.textContent = text; };
+
+  function markBall(ball) {
+    document.getElementById(`ball-${ball}`)?.classList.add("drawn");
+  }
+
+  function applySnapshot(data) {
+    for (const ball of data.drawn) { markBall(ball); }
+    lastCallEl.textContent = data.last_call || "--";
+    drawCountEl.textContent = data.draw_count;
+    remainingEl.textContent = data.remaining;
+    setRoundStatus(data.status);
+  }
+
+  function setRoundStatus(value) {
+    statusTextEl.textContent = value;
+    startButton.disabled = value !== "open";
+    drawButton.disabled = value !== "drawing";
+    if (value !== "drawing") { stopAuto(); }
+  }
+
+  function stopAuto() {
+    clearInterval(autoTimer);
+    autoTimer = null;
+    autoDraw.checked = false;
+  }
+
+  async function post(path) {
+    const response = await fetch(path, { method: "POST", headers });
+    if (!response.ok) {
+      const problem = await response.json().catch(() => ({}));
+      setStatus(problem.detail || "That action did not go through.");
+      return null;
+    }
+    return response.json();
+  }
+
+  startButton.addEventListener("click", async () => {
+    const data = await post(`/api/rounds/${ROUND_ID}/start`);
+    if (data) {
+      setRoundStatus(data.status);
+      setStatus("Round started. Joining is now closed.");
+    }
+  });
+
+  drawButton.addEventListener("click", async () => {
+    const data = await post(`/api/rounds/${ROUND_ID}/draw`);
+    if (!data) { stopAuto(); }
+  });
+
+  closeButton.addEventListener("click", async () => {
+    const data = await post(`/api/rounds/${ROUND_ID}/close`);
+    if (data) {
+      setRoundStatus(data.status);
+      setStatus("Round closed.");
+    }
+  });
+
+  autoDraw.addEventListener("change", () => {
+    clearInterval(autoTimer);
+    if (!autoDraw.checked) { return; }
+    const seconds = Math.min(30, Math.max(2, Number(autoSeconds.value) || 6));
+    autoTimer = setInterval(() => drawButton.click(), seconds * 1000);
+  });
+
+  const scheme = location.protocol === "https:" ? "wss:" : "ws:";
+  const socket = new WebSocket(`${scheme}//${location.host}/api/rounds/${ROUND_ID}/events`);
+
+  socket.addEventListener("message", (event) => {
+    const payload = JSON.parse(event.data);
+    if (payload.event === "snapshot") {
+      applySnapshot(payload);
+    } else if (payload.event === "ball_drawn") {
+      markBall(payload.ball);
+      lastCallEl.textContent = payload.call;
+      drawCountEl.textContent = payload.sequence_no;
+      remainingEl.textContent = payload.remaining;
+    } else if (payload.event === "round_started") {
+      setRoundStatus(payload.status);
+    } else if (payload.event === "round_won") {
+      setRoundStatus("won");
+      winnerEl.hidden = false;
+      winnerEl.textContent =
+        `BINGO! ${payload.player_name} - ${payload.card_serial} on ball ${payload.draw_count}`;
+    } else if (payload.event === "round_closed") {
+      setRoundStatus("closed");
+    }
+  });
+
+  socket.addEventListener("close", () => setStatus("Disconnected from the live feed."));
+</script>
+{% endblock %}
