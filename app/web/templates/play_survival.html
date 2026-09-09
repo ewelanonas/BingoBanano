@@ -1,47 +1,47 @@
 {% extends "base.html" %}
-{% block title %}Your number - {{ round.join_code }}{% endblock %}
+{% block title %}Your card - {{ round.join_code }}{% endblock %}
 
 {% block content %}
 <section class="panel">
+  {% if welcome %}
+  <p class="alert" role="status">You're in, {{ player_name }}. Bookmark this page.</p>
+  {% endif %}
+
   <h1>Hi {{ player_name }}</h1>
   <p class="muted">
     Round <span class="join-code">{{ round.join_code }}</span> &middot;
-    elimination
+    elimination &middot; card <span class="serial-inline">{{ serial }}</span>
   </p>
 
   <div id="verdict" class="verdict" role="status" aria-live="assertive"
        data-state="{% if is_winner %}winner{% elif is_out %}out{% else %}in{% endif %}">
-    {% if is_winner %}You win! Last one standing.
-    {% elif is_out %}You're out. {{ out_on }} knocked you off.
+    {% if is_winner %}You win! Your card lasted the longest.
+    {% elif is_out %}You're out. Every number on your card was called.
     {% else %}You're still in.
     {% endif %}
   </div>
 
   <p class="muted">
-    {% if numbers|length > 1 %}
-      These are your numbers. If any of them is called, you're out.
-    {% else %}
-      This is your number. If it's called, you're out.
-    {% endif %}
+    You stay in until <strong>every</strong> number below has been called. The last
+    player with a number left wins.
   </p>
 
-  <div class="ticket-numbers">
-    {% for number in numbers %}
-    <div class="ticket-number" id="number-{{ number }}" data-ball="{{ number }}">
-      {{ number }}
-    </div>
-    {% endfor %}
-  </div>
-
   <div class="call-strip">
-    <div class="call-big" id="last-call" aria-live="polite">
-      {{ round.last_call or "--" }}
-    </div>
+    <div class="call-big" id="left-count">{{ left }}</div>
     <dl class="call-meta">
-      <dt>Called</dt><dd id="draw-count">{{ round.draw_count }}</dd>
+      <dt>numbers left</dt><dd>on your card</dd>
+      <dt>Last call</dt><dd id="last-call">{{ round.last_call or "--" }}</dd>
       <dt>Still in</dt><dd id="survivors">{{ round.survivors }}</dd>
     </dl>
   </div>
+
+  <h2 class="section-title">Your numbers, lowest to highest</h2>
+  <ol class="survival-list">
+    {% for number in numbers %}
+    <li class="survival-number {% if number in drawn %}called{% endif %}"
+        id="number-{{ number }}">{{ number }}</li>
+    {% endfor %}
+  </ol>
 
   <p id="message" class="status" role="status" aria-live="polite"></p>
 </section>
@@ -54,19 +54,23 @@
   const MY_NAME = {{ player_name | tojson }};
 
   const verdictEl = document.getElementById("verdict");
+  const leftEl = document.getElementById("left-count");
   const lastCallEl = document.getElementById("last-call");
-  const drawCountEl = document.getElementById("draw-count");
   const survivorsEl = document.getElementById("survivors");
   const messageEl = document.getElementById("message");
+
+  const called = new Set();
+
+  function markCalled(ball) {
+    if (!MY_NUMBERS.includes(ball)) { return; }
+    called.add(ball);
+    document.getElementById(`number-${ball}`)?.classList.add("called");
+    leftEl.textContent = String(MY_NUMBERS.length - called.size);
+  }
 
   function setVerdict(state, text) {
     verdictEl.dataset.state = state;
     verdictEl.textContent = text;
-  }
-
-  function markHit(ball) {
-    const cell = document.getElementById(`number-${ball}`);
-    if (cell) { cell.classList.add("hit"); }
   }
 
   const scheme = location.protocol === "https:" ? "wss:" : "ws:";
@@ -76,31 +80,27 @@
     const payload = JSON.parse(event.data);
 
     if (payload.event === "snapshot") {
-      for (const ball of payload.drawn) {
-        if (MY_NUMBERS.includes(ball)) { markHit(ball); }
-      }
+      for (const ball of payload.drawn) { markCalled(ball); }
       lastCallEl.textContent = payload.last_call || "--";
-      drawCountEl.textContent = payload.draw_count;
       survivorsEl.textContent = payload.survivors;
     } else if (payload.event === "ball_drawn") {
+      markCalled(payload.ball);
       lastCallEl.textContent = payload.call;
-      drawCountEl.textContent = payload.sequence_no;
-      if (MY_NUMBERS.includes(payload.ball)) { markHit(payload.ball); }
     } else if (payload.event === "players_eliminated") {
       survivorsEl.textContent = payload.survivors;
       const me = payload.players.find((p) => p.player_name === MY_NAME);
       if (me) {
-        setVerdict("out", `You're out. ${payload.call} knocked you off.`);
+        setVerdict("out", "You're out. Every number on your card was called.");
       } else {
         const names = payload.players.map((p) => p.player_name).join(", ");
-        messageEl.textContent = `${payload.call} knocked out ${names}.`;
+        messageEl.textContent = `${names} just went out. ${payload.survivors} still in.`;
       }
     } else if (payload.event === "elimination_over") {
-      survivorsEl.textContent = "0";
+      survivorsEl.textContent = payload.winners.length;
       if (payload.winners.includes(MY_NAME)) {
         setVerdict("winner", payload.winners.length > 1
           ? "You win, tied with someone!"
-          : "You win! Last one standing.");
+          : "You win! Your card lasted the longest.");
       } else {
         messageEl.textContent = `${payload.winners.join(" and ")} won this round.`;
       }

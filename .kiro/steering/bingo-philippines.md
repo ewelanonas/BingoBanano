@@ -65,26 +65,33 @@ makakapili ng mananalo.
 
 ## 1b. Elimination, ang laro ng party
 
-Bukod sa pattern bingo, may isa pang format na karaniwan sa PH party at
-madalas nakakaligtaan: **elimination**. May hawak na numero ang bawat bisita, at
-kapag natawag ang numero niya ay labas na siya. Ang huling natira ang panalo.
+Bukod sa pattern bingo, may isa pang format na karaniwan sa PH party:
+**elimination**. Parehong 5x5 card, pero iba ang panalo — nananatili ka hanggang
+**malahat** ang 24 na numero mo, at ang huling may natitirang numero ang panalo.
 
-Bakit hindi bagay dito ang 5x5 card: kung isang numero lang sa card ang
-kailangan para matanggal, sa tatlong bola pa lang ay tapos na ang lahat — 24 na
-numero kada card sa 75 na bola. Kaya **ticket** ang tamang artifact, hindi card:
-isa hanggang lima lang na numero kada bisita.
+Bakit hindi puwede ang "labas sa unang tama": 24 na numero sa 75 na bola, kaya
+32% ng bisita ay labas na pagkatapos ng ISANG bola at 86% pagkatapos ng lima.
+Hindi iyon laro. Ang coverage rule ay nagpapanatiling kasali ang lahat hanggang
+malapit sa dulo.
 
 Mga rule na dapat panatilihin:
 
-- **Unique ang numero kada round.** Ilagay ito sa DB constraint at hindi sa
-  Python check, kung hindi ay puwedeng maghati ng numero ang dalawang sabay na
-  sumali. Bunga nito: isa lang ang natatanggal kada bola, at mas madrama iyon.
-- **Kailangang alam ng app ang bawat bola.** Hindi puwede ang elimination sa
-  cards-only na caller mode dahil walang maihahambing.
-- **Walang ipipindot ang player.** Awtomatiko ang pagtanggal, kaya walang BINGO
-  button. Huwag magdagdag ng claim flow doon.
-- **Kapag ang huling natira ang natawag, panalo pa rin siya.** Siya ang
-  pinakamatagal na tumagal at wala nang susunod sa kanya.
+- **Parehong card sa dalawang laro.** Huwag gumawa ng hiwalay na artifact. Ang
+  knockout state ay nasa card mismo, kaya pareho ang generation, issuance, at
+  storage — isang code path lang.
+- **Isang card kada bisita sa elimination.** Kapag marami, hindi malinaw ang
+  "huling natira".
+- **Kailangang alam ng app ang bawat bola.** Hindi puwede sa cards-only na
+  caller mode dahil walang maihahambing.
+- **Walang ipipindot ang player.** Awtomatiko ang pagtanggal at ang panalo, kaya
+  walang BINGO button. Huwag magdagdag ng claim flow doon.
+- **Idineklara lang ang panalo kapag may aktuwal na natanggal.** Kung wala ang
+  guard na ito, ang round na isang bisita lang ay mananalo agad sa unang bola.
+- **Listahan, hindi grid, ang display.** Walang halaga ang posisyon dito,
+  coverage lang. Sorted low to high, may guhit ang natawag, at may counter ng
+  natitira.
+- **Mahaba ito.** Sa live na test, 74 sa 75 na bola ang kinailangan sa tatlong
+  player. Sabihin ito sa user, huwag hayaang magulat.
 
 ## 2. PH-specific formats
 

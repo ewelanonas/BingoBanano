@@ -32,8 +32,8 @@ from app.config import get_settings
 from app.db.models import (
     CALLER_OFFLINE,
     CLAIM_ANNOUNCED,
+    GAME_ELIMINATION,
     BingoCard,
-    EliminationTicket,
     GameRound,
     Player,
 )
@@ -93,30 +93,6 @@ async def play_board(
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> Response:
     player = await _player_by_token(db, token)
-
-    ticket = await db.scalar(
-        select(EliminationTicket).where(EliminationTicket.player_id == player.id)
-    )
-    if ticket is not None:
-        game = await db.scalar(select(GameRound).where(GameRound.id == ticket.round_id))
-        if game is None:  # pragma: no cover - FK ang pumipigil dito
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND, detail="That round does not exist."
-            )
-        return templates.TemplateResponse(
-            request,
-            "play_ticket.html",
-            {
-                "token": token,
-                "player_name": player.given_name,
-                "round": await rounds.round_summary(db, game),
-                "numbers": await elimination.numbers_for_ticket(db, ticket.id),
-                "is_out": ticket.eliminated_at is not None,
-                "out_on": ticket.eliminated_by_ball,
-                "is_winner": ticket.is_winner,
-            },
-        )
-
     cards = await rounds.cards_for_player(db, player.id)
     if not cards:
         raise HTTPException(
@@ -124,12 +100,38 @@ async def play_board(
         )
 
     game = await _round_of(db, cards)
+    welcome = request.query_params.get("welcome") == "1"
+
+    if game.game_type == GAME_ELIMINATION:
+        drawn = set(await rounds.drawn_balls(db, game.id))
+        card = cards[0]
+        numbers = sorted(elimination.card_numbers(card))
+        return templates.TemplateResponse(
+            request,
+            "play_survival.html",
+            {
+                "token": token,
+                "player_name": player.given_name,
+                "welcome": welcome,
+                "round": await rounds.round_summary(db, game),
+                "serial": card.serial,
+                # Walang halaga ang posisyon dito, coverage lang. Kaya listahan
+                # na sorted, hindi grid.
+                "numbers": numbers,
+                "drawn": sorted(drawn),
+                "left": elimination.numbers_left(card, drawn),
+                "is_out": card.eliminated_at is not None,
+                "is_winner": card.is_winner,
+            },
+        )
+
     return templates.TemplateResponse(
         request,
         "play.html",
         {
             "token": token,
             "player_name": player.given_name,
+            "welcome": welcome,
             "round": await rounds.round_summary(db, game),
             "cards": [_card_payload(card) for card in cards],
             "pattern_groups": pattern_cell_groups(game.pattern),
@@ -154,22 +156,12 @@ async def play_events(
         await websocket.close(code=4404)
         return
 
-    # Ang player ay may card (classic) o may ticket (elimination).
-    round_id: str | None = None
     cards = await rounds.cards_for_player(db, player.id)
-    if cards:
-        round_id = cards[0].round_id
-    else:
-        ticket = await db.scalar(
-            select(EliminationTicket).where(EliminationTicket.player_id == player.id)
-        )
-        round_id = ticket.round_id if ticket else None
-
-    if round_id is None:
+    if not cards:
         await websocket.close(code=4404)
         return
 
-    game = await db.scalar(select(GameRound).where(GameRound.id == round_id))
+    game = await db.scalar(select(GameRound).where(GameRound.id == cards[0].round_id))
     if game is None:  # pragma: no cover
         await websocket.close(code=4404)
         return
@@ -212,20 +204,18 @@ async def claim_bingo(
     player = await _player_by_token(db, token)
     cards = await rounds.cards_for_player(db, player.id)
     if not cards:
-        ticket = await db.scalar(
-            select(EliminationTicket).where(EliminationTicket.player_id == player.id)
-        )
-        if ticket is not None:
-            # Walang ipipindot sa elimination: awtomatiko ang pagtanggal.
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail="This is an elimination round, so there is nothing to claim.",
-            )
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="This board has no cards."
         )
 
     game = await _round_of(db, cards)
+    if game.game_type == GAME_ELIMINATION:
+        # Walang ipipindot dito: awtomatiko ang pagtanggal at ang panalo.
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="This is an elimination round, so there is nothing to claim.",
+        )
+
     try:
         outcome = await rounds.verify_claim(db, game=game, player=player, cards=cards)
     except rounds.RoundError as exc:

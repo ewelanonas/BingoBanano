@@ -81,7 +81,6 @@ async def create_round(
     label: str = "",
     caller_mode: str = CALLER_AUTO,
     game_type: str = GAME_CLASSIC,
-    numbers_per_ticket: int = 1,
 ) -> GameRound:
     if game_type not in GAME_TYPES:
         raise RoundError(f"Unknown game type: {game_type}")
@@ -90,25 +89,19 @@ async def create_round(
     if caller_mode not in CALLER_MODES:
         raise RoundError(f"Unknown caller mode: {caller_mode}")
 
-    if game_type == GAME_ELIMINATION:
-        # Kailangang alam ng app ang bawat bola para may matanggal. Sa
-        # cards-only mode ay wala itong nalalaman.
-        if caller_mode == CALLER_OFFLINE:
-            raise RoundError(
-                "Elimination needs the app to know each number, so it cannot be used "
-                "with the cards-only caller mode."
-            )
-        if not 1 <= numbers_per_ticket <= 5:
-            raise RoundError("Each guest must hold between 1 and 5 numbers.")
-    elif numbers_per_ticket != 1:
-        raise RoundError("Numbers per guest only applies to elimination rounds.")
+    # Kailangang alam ng app ang bawat bola para may matanggal. Sa cards-only
+    # mode ay wala itong nalalaman.
+    if game_type == GAME_ELIMINATION and caller_mode == CALLER_OFFLINE:
+        raise RoundError(
+            "Elimination needs the app to know each number, so it cannot be used "
+            "with the cards-only caller mode."
+        )
 
     for _ in range(_MAX_JOIN_CODE_ATTEMPTS):
         game = GameRound(
             join_code=new_join_code(),
             game_type=game_type,
             pattern=pattern,
-            numbers_per_ticket=numbers_per_ticket,
             caller_mode=caller_mode,
             status=ROUND_OPEN,
             label=label,
@@ -429,14 +422,7 @@ async def round_summary(db: AsyncSession, game: GameRound) -> dict[str, object]:
     )
     extra: dict[str, object] = {}
     if game.game_type == GAME_ELIMINATION:
-        tickets = await elimination.count_tickets(db, game.id)
-        extra = {
-            "survivors": await elimination.count_survivors(db, game.id),
-            "ticket_count": tickets,
-            "numbers_per_ticket": game.numbers_per_ticket,
-        }
-        # Sa elimination ay ticket ang binibilang, wala namang cards.
-        player_total = tickets
+        extra = {"survivors": await elimination.count_survivors(db, game.id)}
 
     return {
         "id": game.id,

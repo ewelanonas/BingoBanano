@@ -4,8 +4,8 @@ Bingo for house parties. 75-ball, Philippine style. The host shows a QR code on 
 laptop, guests scan it with their phone camera, and they are in. Two games:
 
 - **Classic** — everyone gets a 5x5 card and races to complete a pattern
-- **Elimination** — everyone gets a number instead. When it is called, you are
-  out. Last one standing wins
+- **Elimination** — same card, but you survive until every number on it has been
+  called. The last player with a number left wins
 
 Guests only enter a nickname. No accounts, no sign-up, no app to install.
 
@@ -15,7 +15,7 @@ Guests only enter a nickname. No accounts, no sign-up, no app to install.
 ## What works
 
 - **QR pairing** — one QR per guest, single-use, expires after 120 seconds
-- **Two games** — classic pattern bingo, or last-one-standing elimination
+- **Two games** — classic pattern bingo, or last-card-standing elimination
 - **Card generation** — 75-ball, 5x5 grid, FREE center, generated server-side
 - **19 patterns** — any line, rows, columns, diagonals, four corners, postage
   stamp, letter X, cross, kite, blackout
@@ -126,12 +126,23 @@ First pick the game.
 **Classic bingo** gives everyone a 5x5 card and a pattern to complete. Choose a
 pattern too — `any_line` finishes fastest, good for a first game.
 
-**Elimination** gives everyone a number instead of a card. When that number is
-called, they are out, and the last one standing wins. You can hand each guest up
-to 5 numbers to make rounds shorter. Numbers are unique across guests, so one call
-knocks out exactly one person, which keeps it dramatic. There is no BINGO button
-in this game because knockouts are automatic. It needs the app to know the
-numbers, so cards-only calling is not available for it.
+**Elimination** hands out the same card but changes how you win. You stay in until
+**every** number on your card has been called, and the last player with a number
+left wins. Nobody drops out early, so everyone plays to the end.
+
+Guests see their 24 numbers as a list from lowest to highest, with called ones
+struck through and a count of how many are left. Position does not matter in this
+game, only coverage, so a grid would just be harder to read. There is no BINGO
+button because knockouts and the win are automatic.
+
+Two things to expect. Each guest gets exactly one card, since more cards would
+muddy "last one standing". And the round uses most of the ball pool: a live
+three-player round here needed **74 of 75 balls**, so budget around 7 minutes on a
+6-second auto-draw. The tension is all at the end, when everyone is down to one or
+two numbers.
+
+Elimination needs the app to know the numbers, so cards-only calling is not
+available for it.
 
 Then choose who calls the numbers:
 
@@ -160,9 +171,12 @@ On the guest's phone: open the **normal camera app** and point it at the QR. Do
 not use an in-app scanner like the one in Facebook or Messenger. The link opens,
 they type a nickname, and press **Generate my cards**.
 
-Their cards appear along with an **Open your live board** link. They should open
-it and leave that tab open — that is where each ball shows up and where the BINGO
-button lives.
+They land straight on their live board, which is where each ball shows up and where
+the BINGO button lives. They should leave that tab open and bookmark it.
+
+There is deliberately no confirmation screen in between. An earlier version showed
+the cards there too, and because that copy was a static picture rather than the
+interactive board, guests tapped numbers on it and nothing happened.
 
 One QR per guest. Each is single-use, so press **Generate QR** again for the next
 person. A QR expires after 120 seconds; just generate a new one if it lapses.
@@ -443,7 +457,7 @@ app/
   services/    # pairing, rounds, issuance, audit, events
   api/         # HTTP and WebSocket routes
   web/         # Jinja2 templates and CSS
-tests/         # 123 tests
+tests/         # 121 tests
 scripts/       # setup-dev.ps1, start-tunnel.ps1
 ```
 
@@ -487,11 +501,18 @@ decision to the host instead of guessing.
 **In app-draws mode the host cannot choose a ball.** Supplying one is rejected,
 because a host who could pick the numbers could pick the winner.
 
-**Elimination numbers are unique per round, enforced by the database.** A unique
-constraint on `(round_id, number)` means two guests can never be handed the same
-number even if they scan at the same moment. That is also why one call removes
-exactly one guest. If the very last survivor's number comes up, they still win,
-having outlasted everyone.
+**Elimination reuses the ordinary card rather than a separate artifact.** Knockout
+state lives on the card itself, so the two games share card generation, issuing and
+storage. The alternative rule, out on your first called number, is unplayable with
+a 24-number card: 32% of guests would be out after one ball and 86% after five.
+
+**A round is only decided once somebody is actually knocked out.** Without that
+check, a round with a single guest would declare them the winner on the first ball
+for being the last one standing, before any game had been played.
+
+**Cards finished by the same ball tie.** Near the end everyone is down to one or
+two numbers, so a single call can finish several cards at once, and splitting a win
+there is fairer than picking arbitrarily.
 
 **Only a nickname is stored about a player.** No birth date, no email, no ID. A
 player's live board is reachable through an unguessable capability URL rather than
@@ -506,7 +527,7 @@ cannot use, so that falls back to `BINGO_PUBLIC_BASE_URL`.
 ## Development
 
 ```powershell
-.\.venv\Scripts\python.exe -m pytest -q          # 123 tests
+.\.venv\Scripts\python.exe -m pytest -q          # 121 tests
 .\.venv\Scripts\python.exe -m ruff check .
 .\.venv\Scripts\python.exe -m ruff format .
 .\.venv\Scripts\python.exe -m mypy               # strict on app/domain

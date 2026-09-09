@@ -42,7 +42,8 @@ async def join(
     nonce = created.json()["pair_url"].rsplit("/", 1)[-1]
 
     claimed = await client.post(f"/pair/{nonce}/claim", data={"given_name": name})
-    assert claimed.status_code == 200, claimed.status_code
+    # Diretso sa live board, kaya redirect at hindi 200.
+    assert claimed.status_code == 303, claimed.status_code
 
     async with get_session_factory()() as db:
         player = await db.scalar(select(Player).where(Player.given_name == name))

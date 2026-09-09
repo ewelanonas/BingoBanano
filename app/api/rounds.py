@@ -50,7 +50,6 @@ class CreateRoundRequest(BaseModel):
     pattern: str = "any_line"
     label: str = Field(default="", max_length=64)
     caller_mode: str = CALLER_AUTO
-    numbers_per_ticket: int = Field(default=1, ge=1, le=5)
 
 
 class DrawRequest(BaseModel):
@@ -67,8 +66,6 @@ class RoundResponse(BaseModel):
     caller_mode: str
     status: str
     survivors: int | None = None
-    ticket_count: int | None = None
-    numbers_per_ticket: int | None = None
     label: str
     drawn: list[int]
     draw_count: int
@@ -120,7 +117,6 @@ async def create_round(
             label=payload.label,
             caller_mode=payload.caller_mode,
             game_type=payload.game_type,
-            numbers_per_ticket=payload.numbers_per_ticket,
         )
     except rounds.RoundError as exc:
         raise HTTPException(
@@ -218,8 +214,9 @@ async def draw_ball(
     )
 
     if game.game_type == GAME_ELIMINATION:
+        drawn = set(await rounds.drawn_balls(db, round_id))
         effect = await elimination.apply_draw(
-            db, game=game, ball=result.ball, draw_count=result.sequence_no
+            db, game=game, drawn=drawn, draw_count=result.sequence_no
         )
         if effect.knocked_out:
             await get_broker().publish(
@@ -230,7 +227,7 @@ async def draw_ball(
                     "call": result.call,
                     "draw_count": result.sequence_no,
                     "players": [
-                        {"player_name": knock.player_name, "numbers": knock.numbers}
+                        {"player_name": knock.player_name, "serial": knock.card_serial}
                         for knock in effect.knocked_out
                     ],
                     "survivors": effect.survivors,
@@ -340,7 +337,7 @@ async def caller_screen(
         "patterns": sorted(PATTERNS),
         "caller_modes": CALLER_MODES,
         "game_types": GAME_TYPES,
-        "roster": await elimination.roster(db, game.id)
+        "roster": await elimination.roster(db, game.id, set(await rounds.drawn_balls(db, game.id)))
         if game.game_type == GAME_ELIMINATION
         else [],
     }

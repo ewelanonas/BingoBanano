@@ -29,10 +29,14 @@ async def test_missing_columns_are_reported_at_startup(
     db_path = tmp_path / "stale.db"
     await _build_current(db_path)
 
-    # Gayahin ang database na gawa bago pa idagdag ang elimination.
+    # Gayahin ang database na gawa bago pa idagdag ang caller modes at elimination.
     connection = sqlite3.connect(db_path)
-    for column in ("game_type", "numbers_per_ticket", "caller_mode"):
+    for column in ("game_type", "caller_mode"):
         connection.execute(f"ALTER TABLE game_round DROP COLUMN {column}")
+    # Hindi puwedeng i-drop ng SQLite ang column na naka-index, kaya ang
+    # `eliminated_at` ay iniiwan at ang mga hindi naka-index ang tinatanggal.
+    for column in ("is_winner", "eliminated_at_draw"):
+        connection.execute(f"ALTER TABLE bingo_card DROP COLUMN {column}")
     connection.commit()
     connection.close()
 
@@ -56,7 +60,10 @@ async def test_missing_columns_are_reported_at_startup(
     assert "game_round" in message
     assert "game_type" in message
     assert "caller_mode" in message
-    assert "numbers_per_ticket" in message
+    # Sinasabi rin ang ibang table na may kulang, hindi lang ang unang nakita.
+    assert "bingo_card" in message
+    assert "is_winner" in message
+    assert "eliminated_at_draw" in message
     assert "Remove-Item" in message
     assert "-Reset" in message
 
@@ -86,8 +93,7 @@ async def test_a_missing_table_is_reported(tmp_path: Path, monkeypatch: pytest.M
     await _build_current(db_path)
 
     connection = sqlite3.connect(db_path)
-    connection.execute("DROP TABLE ticket_number")
-    connection.execute("DROP TABLE elimination_ticket")
+    connection.execute("DROP TABLE audit_event")
     connection.commit()
     connection.close()
 

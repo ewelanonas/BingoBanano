@@ -483,3 +483,43 @@ button.board-ball.drawn {
 .roster-row.winner-row .roster-name { text-decoration: none; }
 .roster-row.winner-row .roster-state { color: var(--accent-ink); font-weight: 700; }
 .roster-row.winner-row .roster-numbers b { background: var(--accent-ink); color: var(--accent); }
+
+/* --- Survival list: walang halaga ang posisyon, coverage lang --- */
+
+.survival-list {
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin: 0.6rem 0 0;
+  padding: 0;
+}
+
+.survival-number {
+  min-width: 3rem;
+  padding: 0.5rem 0.3rem;
+  border: 2px solid var(--accent);
+  border-radius: 10px;
+  background: var(--panel);
+  color: var(--ink);
+  font-size: 1.15rem;
+  font-weight: 700;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+.survival-number.called {
+  background: var(--bg);
+  border-color: var(--line);
+  border-style: dashed;
+  color: var(--muted);
+  font-weight: 400;
+  text-decoration: line-through;
+}
+
+.serial-inline {
+  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  font-size: 0.85em;
+}
+
+.call-strip .call-meta dt { white-space: nowrap; }

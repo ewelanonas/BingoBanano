@@ -22,18 +22,18 @@ from fastapi import (
     WebSocketDisconnect,
     status,
 )
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import templates
 from app.api.security import enforce_rate_limit, require_operator
 from app.config import Settings, get_settings
-from app.db.models import GAME_ELIMINATION, PAIRING_PENDING, ROUND_OPEN, Player
+from app.db.models import GAME_CLASSIC, GAME_ELIMINATION, PAIRING_PENDING, ROUND_OPEN, Player
 from app.db.session import get_db
 from app.domain.cards import Card
 from app.domain.rng import new_play_token, system_randomizer
-from app.services import audit, elimination, issuance, rounds
+from app.services import audit, issuance, rounds
 from app.services import pairing as pairing_service
 from app.services.events import get_broker
 from app.services.identity import utcnow
@@ -171,6 +171,10 @@ async def create_pairing(
         )
 
     card_count = payload.card_count or settings.default_card_count
+    if game.game_type == GAME_ELIMINATION:
+        # Isang card kada bisita. Kung marami, hindi malinaw ang "huling natira"
+        # at mahihila pa nito ang laro nang mas mahaba.
+        card_count = 1
     if card_count > settings.max_card_count:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
@@ -338,22 +342,12 @@ async def pair_claim(
     try:
         claimed = await pairing_service.consume(db, nonce=nonce, player_id=player.id)
         game = await rounds.get_round(db, claimed.round_id)
-        if game is not None and game.game_type == GAME_ELIMINATION:
-            # Elimination: numero ang ibinibigay, hindi 5x5 card.
-            ticket_numbers = await elimination.issue_ticket(
-                db, game=game, player=player, rng=system_randomizer()
-            )
-            cards = []
-        else:
-            ticket_numbers = []
-            cards = await issuance.issue_cards(
-                db, pairing=claimed, player=player, rng=system_randomizer()
-            )
-    except (
-        pairing_service.PairingUnavailableError,
-        issuance.IssuanceError,
-        elimination.EliminationError,
-    ) as exc:
+        # Parehong card sa dalawang laro. Ang pinagkaiba ay ang panalo, hindi
+        # ang ibinibigay.
+        cards = await issuance.issue_cards(
+            db, pairing=claimed, player=player, rng=system_randomizer()
+        )
+    except (pairing_service.PairingUnavailableError, issuance.IssuanceError) as exc:
         await db.rollback()
         await audit.record(
             db,
@@ -363,13 +357,6 @@ async def pair_claim(
             detail={"reason": type(exc).__name__},
         )
         await db.commit()
-        if isinstance(exc, elimination.EliminationError):
-            return templates.TemplateResponse(
-                request,
-                "pair_unavailable.html",
-                {"reason": "full", "detail": str(exc)},
-                status_code=status.HTTP_409_CONFLICT,
-            )
         return templates.TemplateResponse(
             request,
             "pair_unavailable.html",
@@ -383,12 +370,9 @@ async def pair_claim(
         outcome=audit.OUTCOME_OK,
         nonce=nonce,
         player_id=player.id,
-        detail={"cards": len(cards), "numbers": len(ticket_numbers)},
+        detail={"cards": len(cards)},
     )
     await db.commit()
-
-    pattern = game.pattern if game else "any_line"
-    is_elimination = bool(ticket_numbers)
 
     await get_broker().publish(
         f"pairing:{claimed.id}",
@@ -397,24 +381,18 @@ async def pair_claim(
             "pairing_id": claimed.id,
             "round_id": claimed.round_id,
             "player_name": player.given_name,
-            "pattern": pattern,
+            "pattern": game.pattern if game else "any_line",
+            "game_type": game.game_type if game else GAME_CLASSIC,
             "cards": [_card_payload(card) for card in cards],
-            "numbers": ticket_numbers,
         },
     )
 
-    return templates.TemplateResponse(
-        request,
-        "pair_result.html",
-        {
-            "player_name": player.given_name,
-            "pattern": pattern,
-            "cards": [_card_payload(card) for card in cards],
-            "numbers": ticket_numbers,
-            "is_elimination": is_elimination,
-            # Dito na siya mananatili habang tumatakbo ang laro.
-            "play_url": f"/play/{player.play_token}",
-        },
+    # Diretso sa live board. Dati ay may confirmation page na nagpapakita ng
+    # cards na kamukha ng totoo pero hindi napipindot — doon tumatapik ang mga
+    # bisita at walang nangyayari.
+    return RedirectResponse(
+        f"/play/{player.play_token}?welcome=1",
+        status_code=status.HTTP_303_SEE_OTHER,
     )
 
 

@@ -125,11 +125,20 @@ async def test_landing_page_then_claim_issues_cards(
     assert landing.status_code == 200
     assert "Generate my cards" in landing.text
 
+    # Ang claim ay dumidiretso sa live board. Dati ay may confirmation page na
+    # may kamukhang cards pero hindi napipindot, at doon tumatapik ang mga bisita.
     claimed = await client.post(f"/pair/{nonce}/claim", data=claim_form())
-    assert claimed.status_code == 200
-    assert "BB-" in claimed.text
-    assert "FREE" in claimed.text
-    assert "/play/" in claimed.text
+    assert claimed.status_code == 303
+    location = claimed.headers["location"]
+    assert location.startswith("/play/")
+    assert location.endswith("?welcome=1")
+
+    board = await client.get(location)
+    assert board.status_code == 200
+    assert "BB-" in board.text
+    assert "FREE" in board.text
+    # Ang cards sa live board ay pinipindot.
+    assert 'class="dab"' in board.text
 
     async with get_session_factory()() as db:
         cards = (await db.scalars(select(BingoCard))).all()
@@ -152,7 +161,7 @@ async def test_joining_only_needs_a_nickname(
     assert 'type="date"' not in landing.text
 
     claimed = await client.post(f"/pair/{nonce}/claim", data={"given_name": "  Tita Baby  "})
-    assert claimed.status_code == 200
+    assert claimed.status_code == 303
 
     async with get_session_factory()() as db:
         player = await db.scalar(select(Player))
@@ -185,7 +194,7 @@ async def test_nonce_cannot_be_replayed(
     nonce = nonce_from(pairing)
 
     first = await client.post(f"/pair/{nonce}/claim", data=claim_form())
-    assert first.status_code == 200
+    assert first.status_code == 303
 
     second = await client.post(f"/pair/{nonce}/claim", data=claim_form())
     assert second.status_code == 410
@@ -230,7 +239,7 @@ async def test_concurrent_claims_only_one_wins(
     )
 
     statuses = [r.status_code for r in responses if not isinstance(r, BaseException)]
-    assert statuses.count(200) == 1, f"dapat isa lang ang mananalo, nakuha {statuses}"
+    assert statuses.count(303) == 1, f"dapat isa lang ang mananalo, nakuha {statuses}"
 
     async with get_session_factory()() as db:
         cards = (await db.scalars(select(BingoCard))).all()
