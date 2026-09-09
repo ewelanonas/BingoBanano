@@ -17,8 +17,18 @@
 .PARAMETER Port
     Ang port na gagamitin. Default 8000.
 
+.PARAMETER Reset
+    Burahin ang local database file. Kailangan ito kapag nag-update ka ng app at
+    may bagong column: ang `create_all()` ay hindi nagdadagdag ng column sa
+    existing na table, kaya luma ang schema at bumabagsak ang paggawa ng round.
+    Disposable naman ang mga round, walang mawawalang mahalaga.
+
 .EXAMPLE
     .\scripts\setup-dev.ps1
+
+.EXAMPLE
+    # Pagkatapos ng git pull na may bagong feature
+    .\scripts\setup-dev.ps1 -Reset
 
 .EXAMPLE
     # Sa administrator PowerShell, kasama ang firewall rule
@@ -27,6 +37,7 @@
 [CmdletBinding()]
 param(
     [switch]$AddFirewallRule,
+    [switch]$Reset,
     [int]$Port = 8000
 )
 
@@ -62,6 +73,18 @@ function Get-LanAddress {
     # Mas gusto ang Wi-Fi: doon karaniwang nakakonekta ang phone.
     ($candidates | Sort-Object -Property @{ Expression = 'IsWifi'; Descending = $true } |
         Select-Object -First 1)
+}
+
+if ($Reset) {
+    Write-Step 'Binubura ang lumang database'
+    $removed = 0
+    foreach ($file in Get-ChildItem -Path $repo -Filter '*.db' -File -ErrorAction SilentlyContinue) {
+        Remove-Item -Force $file.FullName
+        Write-Note "Naalis: $($file.Name)"
+        $removed++
+    }
+    if ($removed -eq 0) { Write-Note 'Wala namang database file. Ayos lang.' }
+    Write-Note 'Gagawa ng bago sa susunod na pagtakbo ng server.'
 }
 
 Write-Step 'Hinahanap ang LAN IP'
@@ -176,4 +199,9 @@ Write-Host @"
     bisita ay nasa mobile data o sa ibang network, kailangan ng public link:
 
          .\scripts\start-tunnel.ps1
+
+    Kung may error na "created by an older version" pagkatapos ng git pull,
+    lumang database ang dahilan. Solusyon:
+
+         .\scripts\setup-dev.ps1 -Reset
 "@ -ForegroundColor Gray

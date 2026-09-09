@@ -399,6 +399,7 @@ Open `http://<LAN-IP>:8000/healthz` in the **phone's browser**. You should see
 | Phone tries to open itself | You opened the lobby on `localhost`, so the QR fell back to config | Open the lobby on your LAN IP or tunnel URL instead |
 | IP changed after rejoining Wi-Fi | New DHCP lease | Update `BINGO_PUBLIC_BASE_URL` and restart |
 | Host cannot sign in, returns 429 | Login rate limit tripped | Wait a minute; it is 10 attempts per IP |
+| Server refuses to start, "created by an older version" | Your database predates a feature you just pulled | `.\scripts\setup-dev.ps1 -Reset` |
 | **Cloudflare error 1033** | The tunnel is not connected: its window was closed, or the QR is from an older tunnel run | Restart `start-tunnel.ps1`, leave it open, and generate a **new** QR |
 | Cloudflare error 502 through the tunnel | Tunnel is up but the server is not answering on `127.0.0.1:8000` | Start the server, or check it is bound to `127.0.0.1` and not another address |
 
@@ -438,7 +439,7 @@ app/
   services/    # pairing, rounds, issuance, audit, events
   api/         # HTTP and WebSocket routes
   web/         # Jinja2 templates and CSS
-tests/         # 118 tests
+tests/         # 121 tests
 scripts/       # setup-dev.ps1, start-tunnel.ps1
 ```
 
@@ -501,11 +502,29 @@ cannot use, so that falls back to `BINGO_PUBLIC_BASE_URL`.
 ## Development
 
 ```powershell
-.\.venv\Scripts\python.exe -m pytest -q          # 118 tests
+.\.venv\Scripts\python.exe -m pytest -q          # 121 tests
 .\.venv\Scripts\python.exe -m ruff check .
 .\.venv\Scripts\python.exe -m ruff format .
 .\.venv\Scripts\python.exe -m mypy               # strict on app/domain
 ```
+
+## After pulling an update
+
+New features sometimes add database columns. Schema is created with
+`create_all()`, which adds missing tables but **not** missing columns, so an
+existing database file from an older version will be short a column or two.
+
+The server checks for this at startup and refuses to run with a message naming
+the columns and the fix, rather than letting it surface later as a mystery error
+when you try to create a round. The fix:
+
+```powershell
+.\scripts\setup-dev.ps1 -Reset
+```
+
+That deletes the local database. Nothing of value is lost — rounds only last an
+evening. If you ever need games to survive updates, that is the point to add
+Alembic migrations.
 
 ## Not included
 
