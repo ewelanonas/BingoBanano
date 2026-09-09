@@ -382,7 +382,9 @@ async def test_classic_rounds_are_untouched(
     assert len(cards) == 2
     page = await client.get(f"/play/{token}")
     assert "BINGO!" in page.text
-    assert 'class="dab"' in page.text
+    # 5x5 grid pa rin, hindi ang sorted na listahan ng elimination.
+    assert "FREE" in page.text
+    assert "survival-number" not in page.text
 
     async with get_session_factory()() as db:
         refreshed = await db.scalar(select(GameRound).where(GameRound.id == game["id"]))

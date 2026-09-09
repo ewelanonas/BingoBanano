@@ -22,8 +22,9 @@ Guests only enter a nickname. No accounts, no sign-up, no app to install.
 - **Three ways to call numbers** — let the app draw them, spin your own machine
   and type each number in, or use the app purely as a card dispenser
 - **Caller screen** — large `B-7` display and a 1-to-75 board
-- **Player board** — tap your own numbers or let them mark themselves, plus a
-  "numbers needed" counter and a BINGO button
+- **Player board** — cards light up live as numbers are called, or guests tap their
+  own when the app is not tracking, plus a "numbers needed" counter and a BINGO
+  button
 - **Server-side verification** — no marking data is accepted from the phone
 
 ## Requirements
@@ -193,21 +194,25 @@ Once everyone has joined, press **Open caller screen**. From there:
   your machine, click the number that came out, and it greys out so you cannot
   enter it twice
 
-Cards mark themselves on each guest's phone. When the "Needed" counter reaches 0,
-the BINGO button lights up. They press it and the server decides.
+How cards get marked depends on the calling mode, and only one behaviour is ever
+offered at a time:
 
-Guests who want the real dabbing experience can switch off **Mark my numbers
-automatically** and tap each number themselves. Tapping a number that has not
-been called yet is refused with a nudge, so nobody marks ahead and then wonders
-why their BINGO was rejected. Cells that were called but not yet dabbed are
-outlined, so it is easy to catch up.
+| Mode | Guest's card |
+|---|---|
+| The app draws them | Marks itself. The called number pops briefly so it is obvious which one just landed |
+| I type each number in | Same, marks itself as you enter each ball |
+| Cards only | Guests tap their own numbers, since the app has nothing to mark from |
 
-In cards-only mode there is nothing to check a tap against, so guests can mark
-anything freely and the refusal does not apply. Their marks are saved on their own
-phone, so a locked screen or a closed tab does not wipe the card — which matters
-because in that mode the server does not know the numbers and could not rebuild
-them. There is a **Clear all marks** button for when the tapping gets away from
-someone.
+There is no toggle between the two. If a number looks tappable, it is; if the app
+is tracking the calls, the card just lights up and there is nothing to press.
+
+When the "Needed" counter reaches 0, the BINGO button lights up. Guests press it
+and the server decides.
+
+In cards-only mode, marks are saved on the guest's own phone, so a locked screen or
+a closed tab does not wipe the card — which matters because the server does not
+know the numbers there and could not rebuild them. There is a **Clear all marks**
+button for when the tapping gets away from someone.
 
 If two players complete the pattern on the same ball, both win — co-winners, the
 same way a real bingo hall handles it.
@@ -457,7 +462,7 @@ app/
   services/    # pairing, rounds, issuance, audit, events
   api/         # HTTP and WebSocket routes
   web/         # Jinja2 templates and CSS
-tests/         # 121 tests
+tests/         # 122 tests
 scripts/       # setup-dev.ps1, start-tunnel.ps1
 ```
 
@@ -527,7 +532,7 @@ cannot use, so that falls back to `BINGO_PUBLIC_BASE_URL`.
 ## Development
 
 ```powershell
-.\.venv\Scripts\python.exe -m pytest -q          # 121 tests
+.\.venv\Scripts\python.exe -m pytest -q          # 122 tests
 .\.venv\Scripts\python.exe -m ruff check .
 .\.venv\Scripts\python.exe -m ruff format .
 .\.venv\Scripts\python.exe -m mypy               # strict on app/domain

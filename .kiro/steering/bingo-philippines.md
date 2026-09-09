@@ -90,6 +90,27 @@ Mga rule na dapat panatilihin:
 - **Listahan, hindi grid, ang display.** Walang halaga ang posisyon dito,
   coverage lang. Sorted low to high, may guhit ang natawag, at may counter ng
   natitira.
+
+## 1c. Kung sino ang nagmamarka ng card
+
+Isang gawi lang kada mode, walang toggle. Ang toggle ay nagbibigay ng button na
+minsan may gagawin at minsan wala, at mukhang sira ang app doon.
+
+| Caller mode | Sino ang nagmamarka |
+|---|---|
+| `auto` | ang app, live |
+| `manual` | ang app, live, habang ipinapasok ng host ang bola |
+| `offline` | ang player mismo, malayang pindot |
+
+Mga rule:
+
+- **Kung mukhang napipindot, dapat napipindot.** Sa `auto` at `manual`, plain
+  cell ang render at hindi button.
+- **Kislapin ang kabago-bagong tawag.** Hindi sapat ang kulay: kung hindi
+  nakatingin ang bisita sa eksaktong sandali, hindi niya malalaman kung alin ang
+  bago. Pero huwag kislapin ang galing sa snapshot — dating tawag na iyon.
+- **Igalang ang `prefers-reduced-motion`.** Palitan ng outline ang animation, at
+  huwag itong tanggalin nang walang kapalit.
 - **Mahaba ito.** Sa live na test, 74 sa 75 na bola ang kinailangan sa tatlong
   player. Sabihin ito sa user, huwag hayaang magulat.
 

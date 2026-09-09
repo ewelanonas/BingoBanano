@@ -523,3 +523,54 @@ button.board-ball.drawn {
 }
 
 .call-strip .call-meta dt { white-space: nowrap; }
+
+/* --- "Umilaw" kapag kabago-bagong tawag --- */
+
+/* Ang naka-mark na ay may kulay na. Ito naman ang panandaliang kislap para
+   agad makita kung ALIN ang bagong tawag. */
+table.grid td.just-called {
+  animation: cell-called 900ms ease-out;
+}
+
+@keyframes cell-called {
+  0% {
+    transform: scale(1);
+    box-shadow: inset 0 0 0 3px var(--ink);
+  }
+  35% {
+    transform: scale(1.18);
+    box-shadow: inset 0 0 0 3px var(--ink);
+  }
+  100% {
+    transform: scale(1);
+    box-shadow: inset 0 0 0 0 transparent;
+  }
+}
+
+.call-big.just-called-big {
+  animation: call-pop 700ms ease-out;
+}
+
+@keyframes call-pop {
+  0% { transform: scale(0.7); opacity: 0.4; }
+  55% { transform: scale(1.12); opacity: 1; }
+  100% { transform: scale(1); opacity: 1; }
+}
+
+.survival-number.just-called {
+  animation: cell-called 900ms ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  table.grid td.just-called,
+  .call-big.just-called-big,
+  .survival-number.just-called {
+    animation: none;
+  }
+  /* Kapalit ng animation: naiiwang outline sa huling tawag. */
+  table.grid td.just-called,
+  .survival-number.just-called {
+    outline: 3px solid var(--ink);
+    outline-offset: -3px;
+  }
+}

@@ -61,10 +61,18 @@
 
   const called = new Set();
 
-  function markCalled(ball) {
+  function markCalled(ball, { live } = { live: false }) {
     if (!MY_NUMBERS.includes(ball)) { return; }
     called.add(ball);
-    document.getElementById(`number-${ball}`)?.classList.add("called");
+    const cell = document.getElementById(`number-${ball}`);
+    if (cell) {
+      cell.classList.add("called");
+      if (live) {
+        cell.classList.remove("just-called");
+        void cell.offsetWidth;  // i-restart ang animation kapag sunod-sunod
+        cell.classList.add("just-called");
+      }
+    }
     leftEl.textContent = String(MY_NUMBERS.length - called.size);
   }
 
@@ -80,12 +88,16 @@
     const payload = JSON.parse(event.data);
 
     if (payload.event === "snapshot") {
+      // Dating tawag, kaya hindi pinapakislap.
       for (const ball of payload.drawn) { markCalled(ball); }
       lastCallEl.textContent = payload.last_call || "--";
       survivorsEl.textContent = payload.survivors;
     } else if (payload.event === "ball_drawn") {
-      markCalled(payload.ball);
+      markCalled(payload.ball, { live: true });
       lastCallEl.textContent = payload.call;
+      if (MY_NUMBERS.includes(payload.ball)) {
+        messageEl.textContent = `${payload.call} was on your card.`;
+      }
     } else if (payload.event === "players_eliminated") {
       survivorsEl.textContent = payload.survivors;
       const me = payload.players.find((p) => p.player_name === MY_NAME);

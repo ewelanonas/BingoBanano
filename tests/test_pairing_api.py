@@ -137,8 +137,10 @@ async def test_landing_page_then_claim_issues_cards(
     assert board.status_code == 200
     assert "BB-" in board.text
     assert "FREE" in board.text
-    # Ang cards sa live board ay pinipindot.
-    assert 'class="dab"' in board.text
+    # Ang default na round ay app-draws, kaya awtomatiko ang marka at ang
+    # bawat cell ay may `data-ball` na hinahanap ng live update.
+    assert "data-ball=" in board.text
+    assert "light up on their own" in board.text
 
     async with get_session_factory()() as db:
         cards = (await db.scalars(select(BingoCard))).all()

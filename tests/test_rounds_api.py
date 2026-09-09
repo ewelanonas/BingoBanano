@@ -365,10 +365,14 @@ async def test_play_board_renders_the_stored_cards(
     assert "letter x" in page.text
 
 
-async def test_play_board_cells_are_tappable_buttons(
+async def test_every_number_is_addressable_for_live_marking(
     client: AsyncClient, operator_headers: dict[str, str]
 ) -> None:
-    """Bawat numero ay button para puwedeng i-dab nang manual at keyboard-accessible."""
+    """Bawat numero ay may `data-ball` para mamarkahan kapag natawag.
+
+    Sa app-draws mode ay hindi ito button: awtomatiko ang marka, at ang button
+    na wala namang gagawin ay mukhang sira.
+    """
     game = await make_round(client, operator_headers, "any_line")
     token = await join(client, operator_headers, game["id"], card_count=1)
 
@@ -376,13 +380,9 @@ async def test_play_board_cells_are_tappable_buttons(
     cards = await cards_of(token)
     numbers = [value for value in cards[0].numbers if value]
 
-    # 24 na numero kada card, ang FREE center ay hindi pinipindot.
     assert len(numbers) == 24
-    assert page.text.count('class="dab"') == 24
-    assert page.text.count('aria-pressed="false"') == 24
     for value in numbers:
         assert f'data-ball="{value}"' in page.text
 
-    # Ang auto-daub toggle ay naka-on sa simula.
-    assert 'id="auto-daub"' in page.text
-    assert "Turn this off to tap them yourself" in page.text
+    assert 'class="dab"' not in page.text
+    assert "light up on their own" in page.text

@@ -3,6 +3,10 @@
 
 {% block content %}
 <section class="panel">
+  {% if welcome %}
+  <p class="alert" role="status">You're in, {{ player_name }}. Bookmark this page.</p>
+  {% endif %}
+
   <h1>Hi {{ player_name }}</h1>
   <p class="muted">
     Round <span class="join-code">{{ round.join_code }}</span> &middot;
@@ -32,12 +36,9 @@
     <button id="clear-marks" type="button" class="btn ghost">Clear all marks</button>
   </p>
   {% else %}
-  <div class="field checkbox daub-toggle">
-    <input id="auto-daub" type="checkbox" checked>
-    <label for="auto-daub">
-      Mark my numbers automatically. Turn this off to tap them yourself.
-    </label>
-  </div>
+  <p class="hint">
+    Your numbers light up on their own as they are called. Nothing to tap.
+  </p>
   {% endif %}
 
   <button id="bingo-button" type="button" class="btn bingo">BINGO!</button>
@@ -63,12 +64,16 @@
               <span aria-hidden="true">FREE</span>
               <span class="sr-only">Free space, already marked</span>
             </td>
-            {% else %}
+            {% elif free_marking %}
+            {# Napipindot lang kapag walang binibilang ang app. Kung hindi, #}
+            {# mukhang napipindot pero wala namang dapat mangyari. #}
             <td data-ball="{{ value }}">
               <button type="button" class="dab" data-ball="{{ value }}" aria-pressed="false">
                 {{ value }}
               </button>
             </td>
+            {% else %}
+            <td data-ball="{{ value }}">{{ value }}</td>
             {% endif %}
             {% endfor %}
           </tr>
@@ -86,7 +91,8 @@
   const TOKEN = {{ token | tojson }};
   const PATTERN_GROUPS = {{ pattern_groups | tojson }};
   const CARDS = {{ cards | tojson }};
-  // Kapag walang binibilang ang app, walang maihahambing kaya malaya ang pagpindot.
+  // Kapag walang binibilang ang app, ang player ang nagmamarka. Kung may
+  // binibilang, awtomatiko ang lahat at walang pinipindot.
   const FREE_MARKING = {{ free_marking | tojson }};
 
   const lastCallEl = document.getElementById("last-call");
@@ -94,21 +100,17 @@
   const missingEl = document.getElementById("missing");
   const messageEl = document.getElementById("claim-message");
   const bingoButton = document.getElementById("bingo-button");
-  const autoDaub = document.getElementById("auto-daub");
 
-  // `drawn` is what the caller actually pulled, straight from the server.
-  // `marked` is what this player has dabbed. We only ever allow marking a
-  // number that was drawn, so `marked` stays a subset of `drawn` and the BINGO
-  // button can never light up on a card that would not really win.
   const drawn = new Set();
   const marked = new Set();
 
-  // Ang mga marka ay presentation state lang, kaya sa phone ito naka-store at
-  // hindi sa server. Mahalaga ito sa cards-only mode: walang binibilang ang
-  // server doon, kaya kapag nawala ang tab ay wala nang makakabawi ng marka.
+  // Ang mga marka ay presentation state, kaya sa phone naka-store at hindi sa
+  // server. Sa cards-only mode ito mahalaga: walang binibilang ang server doon,
+  // kaya kapag nawala ang tab ay wala nang makakabawi ng marka.
   const STORAGE_KEY = `bingobanano.marks.${TOKEN}`;
 
   function saveMarks() {
+    if (!FREE_MARKING) { return; }
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify([...marked]));
     } catch (err) {
@@ -131,12 +133,18 @@
 
   function paint(ball) {
     const isMarked = marked.has(ball);
-    const isCallable = drawn.has(ball) && !isMarked;
     for (const cell of cellsFor(ball)) {
       cell.classList.toggle("marked", isMarked);
-      cell.classList.toggle("callable", isCallable);
       const button = cell.querySelector("button.dab");
       if (button) { button.setAttribute("aria-pressed", String(isMarked)); }
+    }
+  }
+
+  function flash(ball) {
+    for (const cell of cellsFor(ball)) {
+      cell.classList.remove("just-called");
+      void cell.offsetWidth;  // i-restart ang animation kapag sunod-sunod
+      cell.classList.add("just-called");
     }
   }
 
@@ -147,22 +155,9 @@
     saveMarks();
   }
 
-  function restoreMarks() {
-    for (const ball of loadSavedMarks()) {
-      // Sa mode na may binibilang, ang marka ay dapat manatiling subset ng
-      // aktuwal na nailabas. Kung hindi, puwedeng umilaw ang BINGO button sa
-      // card na hindi talaga panalo.
-      if (!FREE_MARKING && !drawn.has(ball)) { continue; }
-      marked.add(ball);
-      paint(ball);
-    }
-    updateMissing();
-  }
-
   function refuse(ball) {
     for (const cell of cellsFor(ball)) {
       cell.classList.remove("refused");
-      // Restart the animation on a rapid second tap.
       void cell.offsetWidth;
       cell.classList.add("refused");
     }
@@ -185,26 +180,21 @@
     bingoButton.classList.toggle("ready", best === 0);
   }
 
-  function registerDraw(ball) {
+  function registerDraw(ball, { live }) {
     drawn.add(ball);
-    if (autoDaub && autoDaub.checked) {
-      setMarked(ball, true);
-    } else {
-      paint(ball);
-      updateMissing();
-    }
+    if (FREE_MARKING) { return; }
+    // Tracked mode: awtomatiko ang marka. Kapag live na tawag, pinapakislap
+    // ito para agad makita kung alin ang bago.
+    marked.add(ball);
+    paint(ball);
+    if (live) { flash(ball); }
+    updateMissing();
   }
 
   for (const button of document.querySelectorAll("button.dab")) {
     button.addEventListener("click", () => {
       const ball = Number(button.dataset.ball);
-      if (!FREE_MARKING && !drawn.has(ball)) {
-        // Not called yet, and the server is tracking. Refuse rather than let
-        // someone mark ahead and then wonder why their BINGO was rejected.
-        refuse(ball);
-        messageEl.textContent = `${ball} has not been called yet.`;
-        return;
-      }
+      if (!FREE_MARKING) { return; }
       setMarked(ball, !marked.has(ball));
     });
   }
@@ -221,15 +211,6 @@
     });
   }
 
-  if (autoDaub) {
-    autoDaub.addEventListener("change", () => {
-      if (!autoDaub.checked) { return; }
-      // Catch up on anything already called but not yet dabbed.
-      for (const ball of drawn) { marked.add(ball); paint(ball); }
-      updateMissing();
-    });
-  }
-
   bingoButton.addEventListener("click", async () => {
     bingoButton.disabled = true;
     const response = await fetch(`/api/play/${TOKEN}/bingo`, { method: "POST" });
@@ -240,8 +221,13 @@
     }
   });
 
-  // Sa cards-only mode ay walang snapshot na hihintayin bago maibalik ang marka.
-  if (FREE_MARKING) { restoreMarks(); }
+  if (FREE_MARKING) {
+    for (const ball of loadSavedMarks()) {
+      marked.add(ball);
+      paint(ball);
+    }
+    updateMissing();
+  }
 
   const scheme = location.protocol === "https:" ? "wss:" : "ws:";
   const socket = new WebSocket(`${scheme}//${location.host}/api/play/${TOKEN}/events`);
@@ -249,16 +235,25 @@
   socket.addEventListener("message", (event) => {
     const payload = JSON.parse(event.data);
     if (payload.event === "snapshot") {
-      for (const ball of payload.drawn) { registerDraw(ball); }
+      // Ang snapshot ay dating tawag, kaya hindi pinapakislap.
+      for (const ball of payload.drawn) { registerDraw(ball, { live: false }); }
       if (lastCallEl) { lastCallEl.textContent = payload.last_call || "--"; }
       if (drawCountEl) { drawCountEl.textContent = payload.draw_count; }
-      // Pagkatapos malaman ang aktuwal na nailabas, doon ibabalik ang naka-save
-      // na marka — para masala ang hindi pa natawag sa mode na may binibilang.
-      restoreMarks();
+      updateMissing();
     } else if (payload.event === "ball_drawn") {
-      registerDraw(payload.ball);
-      if (lastCallEl) { lastCallEl.textContent = payload.call; }
+      registerDraw(payload.ball, { live: true });
+      if (lastCallEl) {
+        lastCallEl.textContent = payload.call;
+        lastCallEl.classList.remove("just-called-big");
+        void lastCallEl.offsetWidth;
+        lastCallEl.classList.add("just-called-big");
+      }
       if (drawCountEl) { drawCountEl.textContent = payload.sequence_no; }
+      if (FREE_MARKING) { return; }
+      const mine = CARDS.some((card) => card.numbers.includes(payload.ball));
+      messageEl.textContent = mine
+        ? `${payload.call} is on your card.`
+        : `${payload.call} called.`;
     } else if (payload.event === "round_won") {
       messageEl.textContent =
         `${payload.player_name} won with ${payload.card_serial} on ball ${payload.draw_count}.`;
