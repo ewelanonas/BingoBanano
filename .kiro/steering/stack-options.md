@@ -109,7 +109,35 @@ na pairing.
 - **Printable cards**: `reportlab` para sa PDF na may card serial at signed QR.
   I-HMAC ang QR payload para hindi mapeke ang printed card.
 - **mkcert** — locally-trusted HTTPS cert para matestingan ang in-browser camera
-  sa LAN. Mas mabuti ito kaysa tunnel dahil hindi nag-e-expose sa internet.
+  sa LAN. Mas mabuti ito kaysa tunnel kung LAN lang ang kailangan, dahil hindi
+  ito nag-e-expose sa internet.
+
+## 7a. Pag-abot sa bisitang wala sa parehong network
+
+Ito ang pinakamadalas na kulang: ang LAN setup ay hindi maaabot ng bisitang nasa
+mobile data. Tatlong landas ang puwede, mula sa pinakamagaan.
+
+| Option | Kailan tama | Trade-off |
+|---|---|---|
+| **Cloudflare quick tunnel** (`cloudflared tunnel --url`) | Party ngayon, pansamantala lang | Random na URL kada takbo, at abot ng internet habang bukas |
+| **Named Cloudflare tunnel** o **ngrok** na may account | Paulit-ulit na gamit, gustong stable na URL | Kailangan ng account at kaunting setup |
+| **Tunggal na deploy** sa Fly.io, Railway, o Render | Regular na ginagamit, maraming laro | Kailangan ng Postgres o persistent disk, at totoong ops |
+
+Kapag alinman sa mga ito ang gamit, mga bagay na dapat sabay na ayusin:
+
+- **Bind sa `127.0.0.1` lang** kapag tunnel ang daan. Ang tunnel ang tanging
+  pintuan; huwag magdagdag ng pangalawa.
+- **`--proxy-headers`** at `--forwarded-allow-ips` na naka-limita sa proxy. Kung
+  wala ito, mali ang client IP sa rate limiting at hindi mamamarkahan ng `Secure`
+  ang cookie.
+- **Rate limit sa login.** Ang admin o host page ay abot na ng internet.
+- **Isara pagkatapos.** Ang quick tunnel ay namamatay kasama ng process, pero ang
+  `.env` ay nananatili sa lumang URL — ibalik sa LAN address bago maglaro muli.
+- Kapag totoong deploy na: Postgres, Alembic, secrets manager, at HTTPS na hindi
+  nakadepende sa isang terminal window.
+
+Huwag mag-alok ng tunnel nang hindi sinasabi na ilalagay nito ang app sa
+internet. Desisyon ng user iyon, hindi default.
 
 ## 8. Observability at operations
 

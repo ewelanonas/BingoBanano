@@ -14,7 +14,9 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from app.api.deps import templates
 from app.api.security import (
     OPERATOR_COOKIE,
+    enforce_rate_limit,
     get_session_store,
+    is_secure_request,
     verify_api_key,
 )
 from app.config import get_settings
@@ -47,6 +49,14 @@ async def operator_session(
 ) -> RedirectResponse:
     settings = get_settings()
     settings.require_secrets()
+    # Ang bilang ay sa lahat ng attempt, tama man o mali. Isang beses lang
+    # pumapasok ang host, kaya sapat ang 10 kada minuto at pinapatay nito ang
+    # brute force kapag naka-tunnel ang server.
+    enforce_rate_limit(
+        request,
+        bucket="operator_login",
+        limit=settings.login_rate_limit_per_minute,
+    )
 
     if not verify_api_key(api_key, settings):
         # Walang detalye sa error message — hindi sinasabi kung bakit mali.
@@ -62,7 +72,7 @@ async def operator_session(
         session.token,
         httponly=True,
         samesite="strict",
-        secure=request.url.scheme == "https",
+        secure=is_secure_request(request),
         path="/",
     )
     return response

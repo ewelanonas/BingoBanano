@@ -116,7 +116,8 @@ if (Test-Path $envPath) {
         'BINGO_DEFAULT_CARD_COUNT=2',
         'BINGO_MAX_CARD_COUNT=12',
         'BINGO_PAIRING_RATE_LIMIT_PER_MINUTE=20',
-        'BINGO_BINGO_RATE_LIMIT_PER_MINUTE=120'
+        'BINGO_BINGO_RATE_LIMIT_PER_MINUTE=120',
+        'BINGO_LOGIN_RATE_LIMIT_PER_MINUTE=10'
     )
     # Walang BOM: hindi mabasa ng ibang parser ang unang key kapag may BOM.
     [System.IO.File]::WriteAllLines($envPath, $content, (New-Object System.Text.UTF8Encoding($false)))
@@ -170,4 +171,9 @@ Write-Host @"
          $baseUrl/healthz
        Dapat may {"status":"ok"}. Kung timeout, firewall o Wi-Fi client
        isolation ang problema.
+
+    Ang setup na ito ay para sa mga bisitang kaparehong Wi-Fi. Kung ang mga
+    bisita ay nasa mobile data o sa ibang network, kailangan ng public link:
+
+         .\scripts\start-tunnel.ps1
 "@ -ForegroundColor Gray

@@ -41,6 +41,9 @@ class Settings(BaseSettings):
     # Hiwalay at mas maluwag: normal na pindutin ang BINGO nang paulit-ulit
     # habang tumatakbo ang laro, hindi iyon abuso.
     bingo_rate_limit_per_minute: int = Field(default=120, ge=1, le=1200)
+    # Masikip sadya. Isang beses lang naman pumapasok ang host, at kapag naka-
+    # tunnel ang server ay abot ito ng internet — dito papasok ang brute force.
+    login_rate_limit_per_minute: int = Field(default=10, ge=1, le=120)
 
     def require_secrets(self) -> None:
         if len(self.operator_api_key) < 32:

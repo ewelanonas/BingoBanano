@@ -6,6 +6,7 @@ import asyncio
 import contextlib
 import uuid
 from datetime import datetime
+from ipaddress import ip_address
 from typing import Annotated, Any
 from urllib.parse import urlsplit
 
@@ -72,25 +73,49 @@ def _pair_url(settings: Settings, nonce: str) -> str:
     return f"{settings.public_base_url.rstrip('/')}/pair/{nonce}"
 
 
-def _base_url_warnings(settings: Settings) -> list[str]:
-    """Bantayan ang pinakamadaling pagkakamalian sa QR pairing.
+def _is_private_host(host: str) -> bool:
+    """`True` kung LAN address ang host, `False` kung public na pangalan o IP."""
+    if host in _LOCAL_HOSTS:
+        return True
+    try:
+        return ip_address(host).is_private
+    except ValueError:
+        # Hostname, hindi IP. Ipinapalagay na public.
+        return False
 
-    Kung `localhost` ang naka-encode sa QR, ang phone na mag-scan ay
-    magre-resolve niyan sa sarili niya at mabibigo ang pairing.
+
+def _base_url_warnings(settings: Settings) -> list[str]:
+    """Bantayan ang mga madaling pagkakamalian sa pag-set up ng pairing.
+
+    Tatlong bagay ang hinahanap: localhost na hindi maaabot ng phone, plain
+    HTTP na abot ng internet, at LAN address na hindi maaabot ng bisitang nasa
+    mobile data.
     """
-    host = urlsplit(settings.public_base_url).hostname or ""
+    parts = urlsplit(settings.public_base_url)
+    host = parts.hostname or ""
     warnings: list[str] = []
+
     if host in _LOCAL_HOSTS:
         warnings.append(
-            "Ang BINGO_PUBLIC_BASE_URL ay nakaturo sa localhost. Gumagana ito sa "
-            "parehong makina lang. Para ma-scan ng phone, palitan ng LAN IP "
-            "(halimbawa http://192.168.1.10:8000) at i-bind ang uvicorn sa 0.0.0.0."
+            "BINGO_PUBLIC_BASE_URL points at localhost, so it only works on this "
+            "machine. For phones on the same Wi-Fi, use your LAN IP and bind "
+            "uvicorn to 0.0.0.0. For guests on mobile data, run a tunnel: "
+            ".\\scripts\\start-tunnel.ps1"
         )
-    if urlsplit(settings.public_base_url).scheme != "https" and host not in _LOCAL_HOSTS:
+    elif _is_private_host(host):
         warnings.append(
-            "Plain HTTP ang base URL. Sa production ay dapat HTTPS — dumadaan dito "
-            "ang nonce at ang personal na detalye ng player."
+            "BINGO_PUBLIC_BASE_URL is a LAN address. Guests must be on the same "
+            "Wi-Fi. Anyone on mobile data or another network will time out — run "
+            ".\\scripts\\start-tunnel.ps1 to get a public HTTPS link instead."
         )
+    elif parts.scheme != "https":
+        # Public na host pero walang TLS: dito talaga delikado.
+        warnings.append(
+            "BINGO_PUBLIC_BASE_URL is reachable from the internet over plain "
+            "HTTP. The host key and the join links would travel unencrypted. Use "
+            "an HTTPS tunnel or put TLS in front before sharing this link."
+        )
+
     return warnings
 
 

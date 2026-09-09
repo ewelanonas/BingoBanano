@@ -26,9 +26,19 @@ Guests only enter a nickname. No accounts, no sign-up, no app to install.
 
 - Windows with PowerShell
 - Python 3.13 or newer
-- Laptop and phones on the **same Wi-Fi network**
 - [uv](https://docs.astral.sh/uv/getting-started/installation/) — optional but
   faster; setup falls back to `venv` and `pip` without it
+
+Two ways to run, depending on where your guests are:
+
+| Guests are | Mode | What you need |
+|---|---|---|
+| On your Wi-Fi | LAN | A firewall rule for port 8000 |
+| On mobile data, or a different network | Tunnel | `cloudflared`, no firewall rule |
+
+Start with LAN. Switch to a tunnel only when someone cannot join, and read
+[Guests on mobile data](#guests-on-mobile-data-or-another-network) first because
+a tunnel puts the game on the internet.
 
 ## Setup
 
@@ -145,6 +155,73 @@ outlined, so it is easy to catch up.
 If two players complete the pattern on the same ball, both win — co-winners, the
 same way a real bingo hall handles it.
 
+## Guests on mobile data or another network
+
+The LAN setup only works when everyone is on the same Wi-Fi. A guest on mobile
+data cannot reach `192.168.1.185` — that address does not exist outside your
+network, so their phone times out. The same is true if you are on Ethernet and
+they are on a different Wi-Fi.
+
+To let anyone join from anywhere, the server needs to be reachable from the
+internet. The easiest way is a Cloudflare tunnel, which opens an outbound
+connection from your machine and hands back a public HTTPS URL. No firewall rule,
+no port forwarding, no router changes.
+
+Install `cloudflared` once:
+
+```powershell
+winget install --id Cloudflare.cloudflared
+```
+
+Then, with the server not yet running:
+
+```powershell
+.\scripts\start-tunnel.ps1
+```
+
+The script prints a URL like `https://sunny-banana-42.trycloudflare.com`, writes
+it into `.env` as `BINGO_PUBLIC_BASE_URL`, and keeps the tunnel open. Leave that
+window alone.
+
+In a second window, start the server the way a tunnel expects:
+
+```powershell
+.\.venv\Scripts\python.exe -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --proxy-headers --forwarded-allow-ips="127.0.0.1"
+```
+
+Open the tunnel URL plus `/operator` and host the game exactly as before. The QR
+now contains the public HTTPS link, so guests can scan it from mobile data,
+another Wi-Fi, or another city.
+
+### Read this before you tunnel
+
+A tunnel puts your game on the public internet for as long as it runs. That
+changes the threat model, so a few things are set up deliberately:
+
+- **Bind to `127.0.0.1`, not `0.0.0.0`.** With a tunnel, the tunnel should be the
+  only way in. Two doors means an attacker on your LAN can bypass the tunnel and
+  forge the client IP that rate limiting depends on.
+- **`--proxy-headers` is required.** Without it the app sees every request as
+  coming from the tunnel process itself, so per-IP rate limiting collapses into
+  one shared bucket and cookies are not marked `Secure`.
+- **`--forwarded-allow-ips="127.0.0.1"`** means only the local tunnel is trusted
+  to state the real client IP. Do not widen this to `*` while any other route to
+  the server exists.
+- **The host login is now internet-reachable.** `/operator` is rate limited to 10
+  attempts per minute per IP, and the key is 43 random characters, so guessing it
+  is not realistic. Do not shorten the key.
+- **Close the tunnel when the party ends.** Ctrl+C in the tunnel window. The URL
+  dies with it. Then re-run `setup-dev.ps1` to put your LAN address back in
+  `.env`.
+
+Anyone holding the link can open the join page. For a house party that is fine —
+the worst case is a stranger getting bingo cards for a game they cannot see. Do
+not treat the tunnel URL as a secret, and do not leave it running unattended.
+
+If you would rather not use `cloudflared`, `ngrok http 8000` gives an equivalent
+HTTPS URL; paste it into `.env` as `BINGO_PUBLIC_BASE_URL` yourself and start the
+server with the same proxy flags.
+
 ## When phones cannot reach the server
 
 This is the most common problem. First test:
@@ -155,10 +232,12 @@ Open `http://<LAN-IP>:8000/healthz` in the **phone's browser**. You should see
 | Symptom | Likely cause | Fix |
 |---|---|---|
 | "took long to respond" or a timeout | No firewall rule | Run the setup script with `-AddFirewallRule` in an admin PowerShell |
-| Timeout even with the firewall rule | Wi-Fi client isolation, common on office and condo networks | Start a hotspot on your phone, connect the laptop to it, update `BINGO_PUBLIC_BASE_URL` |
-| "connection refused" | Server not running, or bound to `127.0.0.1` | Restart with `--host 0.0.0.0` |
-| Phone tries to open itself | `localhost` is encoded in the QR | Set `BINGO_PUBLIC_BASE_URL` to the LAN IP |
+| Timeout, and the guest is on mobile data | LAN address in the QR | Use a [tunnel](#guests-on-mobile-data-or-another-network) |
+| Timeout even with the firewall rule | Wi-Fi client isolation, common on office and condo networks | Use a tunnel, or start a hotspot on your phone and connect the laptop to it |
+| "connection refused" | Server not running, or bound to `127.0.0.1` without a tunnel | Restart with `--host 0.0.0.0` |
+| Phone tries to open itself | `localhost` is encoded in the QR | Set `BINGO_PUBLIC_BASE_URL` to the LAN IP or a tunnel URL |
 | IP changed after rejoining Wi-Fi | New DHCP lease | Update `BINGO_PUBLIC_BASE_URL` and restart |
+| Host cannot sign in, returns 429 | Login rate limit tripped | Wait a minute; it is 10 attempts per IP |
 
 The lobby shows the current QR base URL under the form, and the app returns a
 warning when it points at `localhost`, so a misconfiguration is visible right
@@ -181,6 +260,7 @@ Everything lives in `.env`, prefixed with `BINGO_`.
 | `BINGO_MAX_CARD_COUNT` | `12` | Ceiling per pairing |
 | `BINGO_PAIRING_RATE_LIMIT_PER_MINUTE` | `20` | Limit on creating and claiming QRs |
 | `BINGO_BINGO_RATE_LIMIT_PER_MINUTE` | `120` | Limit on pressing BINGO |
+| `BINGO_LOGIN_RATE_LIMIT_PER_MINUTE` | `10` | Limit on host sign-in attempts |
 
 `BINGO_OPERATOR_API_KEY` has no default. If it is missing or shorter than 32
 characters the app refuses to start. That is deliberate: better not to run at all
@@ -195,8 +275,8 @@ app/
   services/    # pairing, rounds, issuance, audit, events
   api/         # HTTP and WebSocket routes
   web/         # Jinja2 templates and CSS
-tests/         # 71 tests
-scripts/       # setup-dev.ps1
+tests/         # 84 tests
+scripts/       # setup-dev.ps1, start-tunnel.ps1
 ```
 
 `app/domain/` imports no FastAPI, no SQLAlchemy, and no networking — pure
@@ -236,7 +316,7 @@ a login.
 ## Development
 
 ```powershell
-.\.venv\Scripts\python.exe -m pytest -q          # 71 tests
+.\.venv\Scripts\python.exe -m pytest -q          # 84 tests
 .\.venv\Scripts\python.exe -m ruff check .
 .\.venv\Scripts\python.exe -m ruff format .
 .\.venv\Scripts\python.exe -m mypy               # strict on app/domain
@@ -262,12 +342,18 @@ a party game, but it is kept as reference in case this ever grows up.
 - `.env`, certificates, and the database are never committed
 - The operator key never reaches browser JavaScript; an HttpOnly cookie plus a
   CSRF token is used instead
+- The session cookie is marked `Secure` automatically when the connection is
+  HTTPS, and left off over plain HTTP so LAN play still works
 - Pairing nonces are never logged in full, only hashed
-- Rate limits sit on QR creation, QR claiming, and BINGO presses
+- Rate limits sit on host sign-in, QR creation, QR claiming, and BINGO presses
 - The firewall rule is scoped to `LocalSubnet`, not the open internet
+- The app inspects `BINGO_PUBLIC_BASE_URL` and warns when the setup cannot work
+  or is unsafe: localhost, a LAN address guests cannot reach, or a public host
+  without HTTPS
 
-This runs over plain HTTP on your LAN, and the app warns you about that. Fine for
-a party in your living room. Do not put it on the internet without HTTPS.
+On the LAN this runs over plain HTTP, which is fine for a living room. Through a
+tunnel it runs over HTTPS but is exposed to the internet — read
+[Read this before you tunnel](#read-this-before-you-tunnel).
 
 When the party is over, remove the firewall rule:
 

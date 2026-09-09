@@ -104,8 +104,13 @@ def get_limiter() -> SlidingWindowLimiter:
 
 
 def client_key(request: Request) -> str:
-    """Rate-limit key. Sa likod ng reverse proxy, gamitin ang trusted
-    `X-Forwarded-For` na pinu-populate ng proxy, hindi ang raw header."""
+    """Rate-limit key.
+
+    Sa likod ng tunnel o reverse proxy, ini-rewrite na ni uvicorn ang
+    `request.client` mula sa `X-Forwarded-For` kapag tumatakbo ito nang may
+    `--proxy-headers`. Kaya hindi natin binabasa ang header nang direkta —
+    ang naka-spoof na header ay hindi papasa kung hindi galing sa trusted proxy.
+    """
     return request.client.host if request.client else "unknown"
 
 
@@ -119,6 +124,17 @@ def enforce_rate_limit(request: Request, *, bucket: str, limit: int) -> None:
 
 def verify_api_key(candidate: str, settings: Settings) -> bool:
     return secrets.compare_digest(candidate, settings.operator_api_key)
+
+
+def is_secure_request(request: Request) -> bool:
+    """`True` kung HTTPS ang aktuwal na koneksyon ng browser.
+
+    Kapag may tunnel, ang TLS ay natatapos sa tunnel at plain HTTP na ang
+    dumarating sa app. Ang `--proxy-headers` ni uvicorn ang nagsasaayos ng
+    `request.url.scheme` mula sa `X-Forwarded-Proto`, kaya doon tayo tumitingin
+    at hindi sa raw socket.
+    """
+    return request.url.scheme == "https"
 
 
 def require_operator(request: Request) -> None:

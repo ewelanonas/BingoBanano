@@ -67,33 +67,65 @@ functions lang para madali i-unit test at ma-audit ng third-party lab.
 ## 3. Local development (Windows / PowerShell)
 
 ```powershell
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
-uv pip install -r requirements.txt
-alembic upgrade head
-uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+uv sync
+# LAN mode: para sa bisitang kaparehong Wi-Fi
+.\.venv\Scripts\python.exe -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
 Gamitin ang `;` bilang command separator, hindi `&&`.
 
-Mahahalagang localhost gotcha para sa QR flow — huwag kalimutan ang mga ito:
+Para sa bisitang nasa mobile data, tunnel mode ang kailangan — tingnan ang §3a
+para sa tamang bind at flags.
+
+Mahahalagang gotcha sa QR flow — huwag kalimutan ang mga ito:
 
 1. **Huwag i-encode ang `localhost` o `127.0.0.1` sa QR.** Kapag in-scan ito ng
-   phone, ang phone ang magiging `localhost`, kaya mabibigo. Bind sa
-   `--host 0.0.0.0` at kunin ang URL mula sa `PUBLIC_BASE_URL` setting (LAN IP
-   ng dev machine, halimbawa `http://192.168.1.10:8000`). Never i-hardcode.
-2. **Windows Firewall** — kailangan ng inbound rule sa port 8000 para makaabot
+   phone, ang phone ang magiging `localhost`, kaya mabibigo. Kunin ang URL mula sa
+   `PUBLIC_BASE_URL` setting. Never i-hardcode.
+2. **Ang LAN IP ay para lang sa bisitang kaparehong network.** Ang
+   `192.168.x.x` ay hindi umiiral sa labas ng Wi-Fi mo, kaya mag-ti-timeout ang
+   bisitang nasa mobile data o sa ibang network. Iba ang solusyon doon, tingnan
+   ang §3a.
+3. **Windows Firewall** — kailangan ng inbound rule sa port 8000 para makaabot
    ang phone na kaparehong Wi-Fi. Sabihin sa user; huwag basta i-disable ang
    firewall.
-3. **Camera API ay nangangailangan ng secure context.** Ang `getUserMedia` ay
+4. **Camera API ay nangangailangan ng secure context.** Ang `getUserMedia` ay
    gumagana lang sa HTTPS o sa `localhost`. Ang `http://192.168.x.x` ay hindi
    secure context, kaya hindi tatakbo ang in-browser scanner sa phone. Dahil
    dito, ang default na design ay **URL-in-QR** (tingnan ang §4) na binubuksan ng
    native camera app — walang kailangang camera permission sa browser.
-4. Kung talagang kailangan ang in-browser scanning sa dev, ang options ay
-   `mkcert` na locally-trusted cert o isang tunnel. Ang tunnel ay nag-e-expose ng
-   dev machine sa internet — itanong muna sa user bago gamitin.
 5. Huwag i-commit ang `.env`, ang mga local cert, o ang SQLite DB file.
+
+## 3a. Dalawang mode ng pag-abot, at ang bind na kaakibat
+
+May dalawang paraan lang na maaabot ang server, at magkaiba ang tamang bind sa
+bawat isa. Ito ang pinakamadaling mapagkamalan, kaya laging tingnan kung alin ang
+ginagamit bago magpayo.
+
+| Mode | Sino ang kayang sumali | Bind | Karagdagang flag |
+|---|---|---|---|
+| LAN | kaparehong Wi-Fi lang | `--host 0.0.0.0` | wala; kailangan ng firewall rule |
+| Tunnel | kahit saan, kasama ang mobile data | `--host 127.0.0.1` | `--proxy-headers --forwarded-allow-ips="127.0.0.1"` |
+
+Mga rule na hindi puwedeng labagin:
+
+- **Sa tunnel mode, `127.0.0.1` ang bind at hindi `0.0.0.0`.** Ang tunnel lang ang
+  dapat na daan papasok. Kapag dalawa ang pintuan, may makakalampas sa tunnel
+  mula sa LAN at mapepeke ang client IP na pinagbabatayan ng rate limiting.
+- **Sa tunnel mode, kailangan ang `--proxy-headers`.** Kung wala ito, ang lahat ng
+  request ay parang galing sa tunnel process, kaya isang shared bucket na lang ang
+  rate limiting at hindi mamamarkahan ng `Secure` ang cookie.
+- **`--forwarded-allow-ips` ay dapat `127.0.0.1`, hindi `*`.** Ang `*` ay
+  nagpapahintulot kahit sino na magsabi ng client IP nila.
+- Huwag basahin ang `X-Forwarded-For` o `X-Forwarded-Proto` nang direkta sa code.
+  Ang `request.client` at `request.url.scheme` ang gamitin — inaayos na ni uvicorn
+  ang mga iyon at hindi tumatalab ang spoofing kung hindi galing sa trusted proxy.
+- Ang tunnel ay nag-e-expose ng makina sa internet. Sabihin ito nang tahasan sa
+  user bago i-rekomenda, at ipaalala na isara pagkatapos.
+
+Kapag naging internet-reachable ang app, ang `/operator` ay maaabot din ng kahit
+sino. Kaya may sariling rate limit ang login at hindi puwedeng paikliin ang
+operator key.
 
 ## 4. QR pairing flow (primary design)
 
