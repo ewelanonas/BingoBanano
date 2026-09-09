@@ -10,18 +10,13 @@
     nagbibigay ng `https://<random>.trycloudflare.com` na URL. Walang inbound
     port na bukas, kaya hindi na kailangan ng firewall rule.
 
-    MAHALAGA: bagong URL ang nakukuha kada takbo ng script. Kapag nasara ang
-    tunnel, patay na ang lumang URL at lahat ng QR na binuo gamit iyon. Kaya:
-      - Panatilihing bukas ang window na ito habang naglalaro
-      - Pagkatapos mag-restart ng tunnel, i-restart din ang server at bumuo
-        ng BAGONG QR. Ang mga lumang QR ay mag-e-error 1033.
+    Hindi hinahawakan ng script na ito ang .env at hindi ito nagre-restart ng
+    server. Kinukuha ng app ang base URL ng QR mula sa address na binuksan ng
+    host, kaya sapat na ang buksan ang tunnel URL sa browser.
 
-    Ang script ay:
-      1. Tinitingnan kung tumatakbo na ang server
-      2. Kinukuha ang tunnel URL
-      3. Isinusulat ito sa .env bilang BINGO_PUBLIC_BASE_URL
-      4. Sinusubukan mismo ang public URL para malaman agad kung gumagana
-      5. Ibinabalik ang dating base URL kapag nasara ang tunnel
+    MAHALAGA: bagong URL ang nakukuha kada takbo. Kapag nasara ang tunnel,
+    patay na ang lumang URL at lahat ng QR na binuo gamit iyon — error 1033 ang
+    lalabas sa phone. Panatilihing bukas ang window na ito habang naglalaro.
 
     SEGURIDAD: habang bukas ito, ang laro mo ay abot ng kahit sino sa internet
     na may URL, kasama ang /operator login page. I-bind ang uvicorn sa
@@ -31,16 +26,12 @@
     Ang local port ng uvicorn. Default 8000.
 
 .PARAMETER StartServer
-    Awtomatikong buksan ang server sa bagong window, may tamang flags na.
-    Iniiwasan nito ang pinakamadaling pagkakamalian: pagpatay sa tunnel dahil
-    sa pag-type ng uvicorn command sa parehong window.
+    Buksan din ang server, may tamang flags na. Iniiwasan nito ang pinakamadaling
+    pagkakamalian: pagpatay sa tunnel dahil sa pag-type ng uvicorn command sa
+    parehong window.
 
 .EXAMPLE
     .\scripts\start-tunnel.ps1 -StartServer
-
-.EXAMPLE
-    # Kung mano-mano mong pinapatakbo ang server sa ibang window
-    .\scripts\start-tunnel.ps1
 #>
 [CmdletBinding()]
 param(
@@ -57,7 +48,6 @@ function Write-Note($text) { Write-Host "    $text" -ForegroundColor DarkGray }
 function Write-Warn($text) { Write-Host "    $text" -ForegroundColor Yellow }
 function Write-Good($text) { Write-Host "    $text" -ForegroundColor Green }
 
-$envPath = Join-Path $repo '.env'
 $python = Join-Path $repo '.venv\Scripts\python.exe'
 $serverArgs = @(
     '-m', 'uvicorn', 'app.main:app',
@@ -74,9 +64,18 @@ function Test-ServerUp {
     }
 }
 
+function Wait-ForServer([int]$Seconds = 15) {
+    $deadline = (Get-Date).AddSeconds($Seconds)
+    while ((Get-Date) -lt $deadline) {
+        if (Test-ServerUp) { return $true }
+        Start-Sleep -Milliseconds 500
+    }
+    return $false
+}
+
 # --- 1. Mga kailangan ------------------------------------------------------
 
-if (-not (Test-Path $envPath)) {
+if (-not (Test-Path (Join-Path $repo '.env'))) {
     Write-Warn 'Walang .env. Patakbuhin muna ang .\scripts\setup-dev.ps1'
     exit 1
 }
@@ -95,8 +94,8 @@ if (-not $cloudflared) {
     Alternatibo kung ayaw mo ng cloudflared: ngrok.
       winget install --id Ngrok.Ngrok
       ngrok http $Port
-    Kunin ang https URL na ipinapakita nito, ilagay sa .env bilang
-    BINGO_PUBLIC_BASE_URL, tapos i-restart ang server.
+    Buksan ang https URL na ibibigay nito, tapos maglaro. Hindi na kailangang
+    baguhin ang .env.
 "@ -ForegroundColor Gray
     exit 1
 }
@@ -108,20 +107,26 @@ $serverProcess = $null
 
 if (Test-ServerUp) {
     Write-Good "Tumatakbo na sa http://127.0.0.1:$Port"
-    Write-Note 'Kailangan nitong naka-bind sa 127.0.0.1 at may --proxy-headers.'
-    Write-Note 'Kapag hindi, i-restart ito matapos makuha ang tunnel URL.'
+    Write-Note 'Siguraduhing may --proxy-headers ito, kung hindi ay mali ang'
+    Write-Note 'client IP sa rate limiting at hindi Secure ang cookie.'
 } elseif ($StartServer) {
     if (-not (Test-Path $python)) {
         Write-Warn "Walang virtualenv sa $python. Patakbuhin ang .\scripts\setup-dev.ps1"
         exit 1
     }
     Write-Note 'Binubuksan ang server sa bagong window...'
-    $serverProcess = Start-Process -FilePath $python -ArgumentList $serverArgs -PassThru
-    for ($i = 0; $i -lt 20 -and -not (Test-ServerUp); $i++) { Start-Sleep -Milliseconds 500 }
-    if (Test-ServerUp) {
-        Write-Good 'Tumatakbo na ang server.'
+    $serverProcess = Start-Process -FilePath $python -ArgumentList $serverArgs `
+        -WorkingDirectory $repo -PassThru
+
+    if (Wait-ForServer) {
+        Write-Good 'Sumasagot na ang server.'
     } else {
-        Write-Warn 'Hindi umandar ang server. Tingnan ang bagong window para sa error.'
+        Write-Warn 'Hindi umandar ang server sa loob ng 15 segundo.'
+        Write-Note 'Tingnan ang bagong window para sa error. Karaniwan: naka-'
+        Write-Note "gamit na ang port $Port ng ibang process."
+        if ($serverProcess -and -not $serverProcess.HasExited) {
+            $serverProcess | Stop-Process -Force
+        }
         exit 1
     }
 } else {
@@ -152,7 +157,6 @@ $process = Start-Process -FilePath $cloudflared.Source `
     -NoNewWindow -PassThru
 
 $publicUrl = $null
-$previous = $null
 $deadline = (Get-Date).AddSeconds(45)
 
 try {
@@ -177,43 +181,14 @@ try {
         exit 1
     }
 
-    # --- 4. Isulat sa .env -------------------------------------------------
-
-    $lines = Get-Content $envPath
-    $previousMatch = $lines | Select-String -Pattern '^BINGO_PUBLIC_BASE_URL=(.*)$'
-    $previous = if ($previousMatch) { $previousMatch.Matches[0].Groups[1].Value } else { $null }
-
-    if ($lines -match '^BINGO_PUBLIC_BASE_URL=') {
-        $lines = $lines -replace '^BINGO_PUBLIC_BASE_URL=.*$', "BINGO_PUBLIC_BASE_URL=$publicUrl"
-    } else {
-        $lines += "BINGO_PUBLIC_BASE_URL=$publicUrl"
-    }
-    [System.IO.File]::WriteAllLines($envPath, $lines, (New-Object System.Text.UTF8Encoding($false)))
-
     Write-Step 'Bukas na ang tunnel'
     Write-Good "Public URL: $publicUrl"
-    Write-Note "Dating base URL: $previous (ibabalik kapag nasara ang tunnel)"
 
-    # --- 5. Kailangan ng restart ang server para makita ang bagong URL -----
-
-    Write-Step 'Ini-restart ang server para gamitin ang bagong URL'
-    if ($serverProcess -and -not $serverProcess.HasExited) {
-        $serverProcess | Stop-Process -Force
-        Start-Sleep -Seconds 1
-        $serverProcess = Start-Process -FilePath $python -ArgumentList $serverArgs -PassThru
-        for ($i = 0; $i -lt 20 -and -not (Test-ServerUp); $i++) { Start-Sleep -Milliseconds 500 }
-        Write-Good 'Naka-restart na, hawak na ang tunnel URL.'
-    } else {
-        Write-Warn 'I-restart ang server mo NGAYON sa kanyang window (Ctrl+C tapos patakbuhin muli).'
-        Write-Note 'Hangga''t hindi, LAN URL pa ang ilalagay sa QR at hindi ito maabot ng bisita.'
-        Read-Host '    Pindutin ang Enter kapag naka-restart na'
-    }
-
-    # --- 6. Subukan ang public URL mismo -----------------------------------
+    # --- 4. Subukan mismo ang public URL ----------------------------------
 
     Write-Step 'Sinusubukan ang public URL'
     $healthy = $false
-    for ($i = 0; $i -lt 10 -and -not $healthy; $i++) {
+    for ($i = 0; $i -lt 12 -and -not $healthy; $i++) {
         try {
             $probe = Invoke-WebRequest -Uri "$publicUrl/healthz" -UseBasicParsing -TimeoutSec 8
             $healthy = $probe.Content -match '"ok"'
@@ -225,21 +200,25 @@ try {
     if ($healthy) {
         Write-Good 'Sagot ang public URL. Puwede nang mag-scan ang mga bisita.'
     } else {
-        Write-Warn 'Hindi sumagot ang public URL. Karaniwang dahilan:'
-        Write-Note '  - Hindi pa tapos ang tunnel; subukan muli sa loob ng ilang segundo'
-        Write-Note '  - Naka-bind ang server sa ibang address, dapat 127.0.0.1'
-        Write-Note "  - May firewall o proxy na humaharang sa cloudflared"
+        Write-Warn 'Hindi sumagot ang public URL pagkatapos ng ~25 segundo.'
+        Write-Note '  - Kung 1033 ang lumabas: hindi pa tapos ang tunnel, hintayin'
+        Write-Note '  - Kung 502: hindi sumasagot ang server sa 127.0.0.1'
+        Write-Note "  - Tingnan: Invoke-WebRequest http://127.0.0.1:$Port/healthz"
+        Write-Note '  - Baka may firewall o proxy na humaharang sa cloudflared'
     }
 
     Write-Host @"
 
     HOST LOBBY : $publicUrl/operator
 
+    Buksan ang link na iyon sa browser. Iyon din ang mapupunta sa QR — kinukuha
+    ito ng app mula sa address na binuksan mo, kaya walang .env na babaguhin at
+    walang restart na kailangan.
+
     Tandaan:
       - Panatilihing bukas ang window na ito. Kapag sarado, patay ang URL at
-        lahat ng QR na binuo gamit iyon (error 1033 ang lalabas sa phone).
-      - Kada takbo ng script ay bagong URL. Pagkatapos mag-restart, bumuo ng
-        BAGONG QR — hindi na gagana ang mga luma.
+        lahat ng QR na binuo gamit iyon (error 1033 sa phone).
+      - Kada takbo ng script ay bagong URL. Bumuo ng bagong QR pagkatapos.
       - Abot ng internet ang laro habang bukas ito.
 
 "@ -ForegroundColor Gray
@@ -251,22 +230,10 @@ try {
         Write-Step 'Isinasara ang tunnel'
         $process | Stop-Process -Force
     }
-
-    # Ibalik ang dating base URL. Kung hindi, may patay na tunnel URL na
-    # matitira sa .env at bawat QR na susunod ay magbibigay ng error 1033.
-    if ($previous) {
-        $lines = Get-Content $envPath
-        $lines = $lines -replace '^BINGO_PUBLIC_BASE_URL=.*$', "BINGO_PUBLIC_BASE_URL=$previous"
-        [System.IO.File]::WriteAllLines($envPath, $lines, (New-Object System.Text.UTF8Encoding($false)))
-        Write-Note "Naibalik na sa .env ang dating base URL: $previous"
-        Write-Note 'I-restart ang server para tumugma.'
-    }
-
     if ($serverProcess -and -not $serverProcess.HasExited) {
         Write-Note 'Isinasara din ang server na binuksan ng script.'
         $serverProcess | Stop-Process -Force
     }
-
     Remove-Item -Force $logFile, "$logFile.out" -ErrorAction SilentlyContinue
     Write-Note 'Sarado na ang tunnel. Hindi na abot ng internet ang laro.'
 }

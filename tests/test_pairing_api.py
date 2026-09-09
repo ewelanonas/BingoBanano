@@ -68,18 +68,25 @@ async def test_create_pairing_returns_qr_and_scannable_url(
     client: AsyncClient, operator_headers: dict[str, str]
 ) -> None:
     round_id = await make_round(client, operator_headers, "blackout")
-    pairing = await create_pairing(client, operator_headers, round_id=round_id, card_count=3)
+
+    # Ang base URL ng QR ay galing sa address na ginamit ng host, kaya dito
+    # nire-request sa LAN IP at hindi sa testserver.
+    response = await client.post(
+        "http://192.168.1.10:8000/api/pairing",
+        json={"round_id": round_id, "card_count": 3},
+        headers=operator_headers,
+    )
+    assert response.status_code == 200, response.text
+    pairing = response.json()
 
     assert pairing["qr_data_uri"].startswith("data:image/svg+xml")
     assert pairing["pair_url"].startswith("http://192.168.1.10:8000/pair/")
     assert pairing["card_count"] == 3
     assert pairing["round_id"] == round_id
     assert pairing["pattern"] == "blackout"
-    # LAN IP kaya walang localhost warning, pero plain HTTP pa rin kaya may
-    # transport warning.
+    # LAN address kaya may babala tungkol sa bisitang wala sa parehong Wi-Fi.
     warnings = [str(item) for item in pairing["warnings"]]
-    assert not any("localhost" in item for item in warnings)
-    assert any("HTTPS" in item for item in warnings)
+    assert any("same Wi-Fi" in item for item in warnings)
     # Ang nonce ay nasa QR lang, hindi sa ibang field.
     assert "nonce" not in pairing
 
@@ -252,15 +259,19 @@ async def test_audit_trail_stores_hashed_nonce_only(
         assert event.nonce_hash == nonce_fingerprint(nonce)
 
 
-async def test_localhost_base_url_raises_a_warning(
+async def test_localhost_host_falls_back_and_warns(
     client: AsyncClient, operator_headers: dict[str, str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """Kapag localhost ang ginamit ng host, hindi puwedeng iyon ang ilagay sa QR."""
     from app.config import get_settings
 
-    settings = get_settings()
-    monkeypatch.setattr(settings, "public_base_url", "http://localhost:8000")
+    monkeypatch.setattr(get_settings(), "public_base_url", "http://localhost:8000")
+    round_id = await make_round(client, operator_headers)
 
-    pairing = await create_pairing(client, operator_headers)
-    warnings = pairing["warnings"]
-    assert isinstance(warnings, list)
-    assert any("localhost" in str(item) for item in warnings)
+    response = await client.post(
+        "http://127.0.0.1:8000/api/pairing",
+        json={"round_id": round_id},
+        headers=operator_headers,
+    )
+    pairing = response.json()
+    assert any("localhost" in str(item) for item in pairing["warnings"])

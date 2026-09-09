@@ -69,8 +69,29 @@ class PairingStatusResponse(BaseModel):
     card_count: int
 
 
-def _pair_url(settings: Settings, nonce: str) -> str:
-    return f"{settings.public_base_url.rstrip('/')}/pair/{nonce}"
+def resolve_base_url(request: Request, settings: Settings) -> str:
+    """Ang base URL na ilalagay sa QR.
+
+    Galing mismo sa request kapag ang host ay pumasok sa address na abot din ng
+    mga bisita — tunnel hostname o LAN IP. Ganito, hindi na kailangang isulat
+    ang tunnel URL sa `.env` at hindi na kailangang i-restart ang server kada
+    bagong tunnel. Iyon ang dating pinagmumulan ng mga patay na QR.
+
+    Kapag `localhost` ang ginamit ng host, hindi puwedeng gamitin iyon — ang
+    phone ang magiging localhost. Doon lang bumabagsak sa naka-configure na
+    `BINGO_PUBLIC_BASE_URL`.
+    """
+    host_header = request.headers.get("host", "")
+    hostname = urlsplit(f"//{host_header}").hostname or ""
+
+    if host_header and hostname not in _LOCAL_HOSTS:
+        return f"{request.url.scheme}://{host_header}"
+
+    return settings.public_base_url.rstrip("/")
+
+
+def _pair_url(base_url: str, nonce: str) -> str:
+    return f"{base_url.rstrip('/')}/pair/{nonce}"
 
 
 def _is_private_host(host: str) -> bool:
@@ -84,36 +105,36 @@ def _is_private_host(host: str) -> bool:
         return False
 
 
-def _base_url_warnings(settings: Settings) -> list[str]:
+def _base_url_warnings(base_url: str) -> list[str]:
     """Bantayan ang mga madaling pagkakamalian sa pag-set up ng pairing.
 
     Tatlong bagay ang hinahanap: localhost na hindi maaabot ng phone, plain
     HTTP na abot ng internet, at LAN address na hindi maaabot ng bisitang nasa
     mobile data.
     """
-    parts = urlsplit(settings.public_base_url)
+    parts = urlsplit(base_url)
     host = parts.hostname or ""
     warnings: list[str] = []
 
-    if host in _LOCAL_HOSTS:
+    if host in _LOCAL_HOSTS or not host:
         warnings.append(
-            "BINGO_PUBLIC_BASE_URL points at localhost, so it only works on this "
-            "machine. For phones on the same Wi-Fi, use your LAN IP and bind "
-            "uvicorn to 0.0.0.0. For guests on mobile data, run a tunnel: "
+            "The QR would point at localhost, which only works on this machine. "
+            "Open the host lobby using your LAN IP instead of 127.0.0.1, or set "
+            "BINGO_PUBLIC_BASE_URL. For guests on mobile data, run a tunnel: "
             ".\\scripts\\start-tunnel.ps1"
         )
     elif _is_private_host(host):
         warnings.append(
-            "BINGO_PUBLIC_BASE_URL is a LAN address. Guests must be on the same "
+            f"The QR points at {host}, a LAN address. Guests must be on the same "
             "Wi-Fi. Anyone on mobile data or another network will time out — run "
             ".\\scripts\\start-tunnel.ps1 to get a public HTTPS link instead."
         )
     elif parts.scheme != "https":
         # Public na host pero walang TLS: dito talaga delikado.
         warnings.append(
-            "BINGO_PUBLIC_BASE_URL is reachable from the internet over plain "
-            "HTTP. The host key and the join links would travel unencrypted. Use "
-            "an HTTPS tunnel or put TLS in front before sharing this link."
+            f"The QR points at {host} over plain HTTP, reachable from the "
+            "internet. The host key and the join links would travel unencrypted. "
+            "Use an HTTPS tunnel or put TLS in front before sharing this link."
         )
 
     return warnings
@@ -172,7 +193,8 @@ async def create_pairing(
     )
     await db.commit()
 
-    url = _pair_url(settings, record.nonce)
+    base_url = resolve_base_url(request, settings)
+    url = _pair_url(base_url, record.nonce)
     qr = segno.make(url, error="m")
 
     return CreatePairingResponse(
@@ -183,7 +205,7 @@ async def create_pairing(
         expires_at=record.expires_at,
         card_count=record.card_count,
         pattern=game.pattern,
-        warnings=_base_url_warnings(settings),
+        warnings=_base_url_warnings(base_url),
     )
 
 

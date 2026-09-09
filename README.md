@@ -179,10 +179,12 @@ Then let the script run both the tunnel and the server:
 .\scripts\start-tunnel.ps1 -StartServer
 ```
 
-The script starts the server with the right flags, opens the tunnel, writes the
-public URL into `.env`, restarts the server so it picks that URL up, and then
-fetches the public URL itself to prove it works. It prints the host lobby link
-when everything is confirmed.
+The script starts the server with the right flags, opens the tunnel, then fetches
+the public URL itself to prove it works before telling you it is ready. It prints
+a host lobby link at the end.
+
+Open that link and host the game from it. Nothing in `.env` needs to change,
+because the QR takes its address from whatever URL you opened the lobby with.
 
 Leave that window open for the whole game. Closing it kills the tunnel.
 
@@ -200,17 +202,13 @@ another Wi-Fi, or another city.
 ### The tunnel URL is disposable
 
 Every run of the script gets a **different** random URL, and the URL dies the
-moment the tunnel closes. Two consequences that bite in practice:
+moment the tunnel closes. So after restarting a tunnel, generate a fresh QR. A
+guest scanning one from an earlier tunnel gets **Cloudflare error 1033**.
 
-- Old QR codes stop working. After restarting a tunnel, generate a fresh QR. A
-  guest scanning a stale one gets **Cloudflare error 1033**.
-- The server must be running with the current URL in `.env`. The script handles
-  the restart for you when you pass `-StartServer`; otherwise it stops and waits
-  for you to restart it manually.
-
-When the tunnel closes, the script puts your previous `BINGO_PUBLIC_BASE_URL`
-back into `.env`, so a dead tunnel URL is not left behind to generate broken QRs
-the next time you play on the LAN.
+No restart is needed for a new tunnel URL. The QR is built from the address you
+opened the host lobby with, so opening the new tunnel URL is enough. That also
+means a dead URL can never linger in configuration and quietly produce broken
+QRs.
 
 ### Read this before you tunnel
 
@@ -254,7 +252,7 @@ Open `http://<LAN-IP>:8000/healthz` in the **phone's browser**. You should see
 | Timeout, and the guest is on mobile data | LAN address in the QR | Use a [tunnel](#guests-on-mobile-data-or-another-network) |
 | Timeout even with the firewall rule | Wi-Fi client isolation, common on office and condo networks | Use a tunnel, or start a hotspot on your phone and connect the laptop to it |
 | "connection refused" | Server not running, or bound to `127.0.0.1` without a tunnel | Restart with `--host 0.0.0.0` |
-| Phone tries to open itself | `localhost` is encoded in the QR | Set `BINGO_PUBLIC_BASE_URL` to the LAN IP or a tunnel URL |
+| Phone tries to open itself | You opened the lobby on `localhost`, so the QR fell back to config | Open the lobby on your LAN IP or tunnel URL instead |
 | IP changed after rejoining Wi-Fi | New DHCP lease | Update `BINGO_PUBLIC_BASE_URL` and restart |
 | Host cannot sign in, returns 429 | Login rate limit tripped | Wait a minute; it is 10 attempts per IP |
 | **Cloudflare error 1033** | The tunnel is not connected: its window was closed, or the QR is from an older tunnel run | Restart `start-tunnel.ps1`, leave it open, and generate a **new** QR |
@@ -274,7 +272,7 @@ Everything lives in `.env`, prefixed with `BINGO_`.
 | Setting | Default | Purpose |
 |---|---|---|
 | `BINGO_OPERATOR_API_KEY` | none | Host password. 32 chars minimum, required |
-| `BINGO_PUBLIC_BASE_URL` | `http://127.0.0.1:8000` | The URL encoded into the QR |
+| `BINGO_PUBLIC_BASE_URL` | `http://127.0.0.1:8000` | Fallback for the QR address, used only when you open the lobby on `localhost` |
 | `BINGO_DATABASE_URL` | SQLite file | Swap for PostgreSQL if you outgrow it |
 | `BINGO_PAIRING_TTL_SECONDS` | `120` | How long a QR stays valid |
 | `BINGO_DEFAULT_CARD_COUNT` | `2` | Cards per guest |
@@ -296,7 +294,7 @@ app/
   services/    # pairing, rounds, issuance, audit, events
   api/         # HTTP and WebSocket routes
   web/         # Jinja2 templates and CSS
-tests/         # 84 tests
+tests/         # 87 tests
 scripts/       # setup-dev.ps1, start-tunnel.ps1
 ```
 
@@ -334,10 +332,16 @@ would have seen different numbers of balls and the game would not be fair.
 player's live board is reachable through an unguessable capability URL rather than
 a login.
 
+**The QR address comes from the request, not from configuration.** Whatever URL
+the host opened the lobby with is what goes into the QR. This is why swapping
+tunnels needs no restart and no config edit, and why a stale URL cannot linger and
+silently produce dead QR codes. The one exception is `localhost`, which a phone
+cannot use, so that falls back to `BINGO_PUBLIC_BASE_URL`.
+
 ## Development
 
 ```powershell
-.\.venv\Scripts\python.exe -m pytest -q          # 84 tests
+.\.venv\Scripts\python.exe -m pytest -q          # 87 tests
 .\.venv\Scripts\python.exe -m ruff check .
 .\.venv\Scripts\python.exe -m ruff format .
 .\.venv\Scripts\python.exe -m mypy               # strict on app/domain

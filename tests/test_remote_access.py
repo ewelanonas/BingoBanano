@@ -113,47 +113,105 @@ async def test_the_whole_host_flow_works_over_https(client: AsyncClient) -> None
 
 
 @pytest.mark.parametrize(
-    ("base_url", "expected"),
+    ("host_url", "expected"),
     [
         ("http://localhost:8000", "only works on this machine"),
         ("http://127.0.0.1:8000", "only works on this machine"),
         ("http://192.168.1.10:8000", "same Wi-Fi"),
         ("http://10.0.0.5:8000", "same Wi-Fi"),
         ("http://172.16.4.4:8000", "same Wi-Fi"),
-        ("http://bingo.example.com", "plain"),
+        ("http://bingo.example.com", "plain HTTP"),
     ],
 )
 async def test_base_url_warnings(
     client: AsyncClient,
     operator_headers: dict[str, str],
     monkeypatch: pytest.MonkeyPatch,
-    base_url: str,
+    host_url: str,
     expected: str,
 ) -> None:
+    # Ang localhost na kaso ay bumabagsak sa configured value, kaya itinatakda
+    # rin ito para consistent ang test.
     from app.config import get_settings
 
-    monkeypatch.setattr(get_settings(), "public_base_url", base_url)
+    monkeypatch.setattr(get_settings(), "public_base_url", host_url)
+
     round_id = await make_round(client, operator_headers)
     pairing = await client.post(
-        "/api/pairing", json={"round_id": round_id}, headers=operator_headers
+        f"{host_url}/api/pairing", json={"round_id": round_id}, headers=operator_headers
     )
     warnings = " ".join(str(item) for item in pairing.json()["warnings"])
     assert expected in warnings, warnings
 
 
-async def test_https_tunnel_url_raises_no_warning(
-    client: AsyncClient, operator_headers: dict[str, str], monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Ito ang tamang setup para sa bisitang nasa mobile data."""
-    from app.config import get_settings
+# --- Base URL na galing sa request ---------------------------------------
 
-    monkeypatch.setattr(
-        get_settings(), "public_base_url", "https://sunny-banana-42.trycloudflare.com"
-    )
+
+async def test_tunnel_host_is_used_without_touching_config(
+    client: AsyncClient, operator_headers: dict[str, str]
+) -> None:
+    """Ito ang buong punto ng fix: walang .env edit, walang server restart.
+
+    Kapag binuksan ng host ang tunnel URL, iyon ang napupunta sa QR kahit LAN
+    address pa ang nasa config.
+    """
     round_id = await make_round(client, operator_headers)
+    tunnel = "https://judges-macintosh-reconstruction.trycloudflare.com"
+
     pairing = await client.post(
-        "/api/pairing", json={"round_id": round_id}, headers=operator_headers
+        f"{tunnel}/api/pairing", json={"round_id": round_id}, headers=operator_headers
     )
     body = pairing.json()
+    assert body["pair_url"].startswith(f"{tunnel}/pair/")
     assert body["warnings"] == []
-    assert body["pair_url"].startswith("https://sunny-banana-42.trycloudflare.com/pair/")
+
+
+async def test_a_new_tunnel_url_needs_no_restart(
+    client: AsyncClient, operator_headers: dict[str, str]
+) -> None:
+    """Bagong tunnel, bagong URL, parehong tumatakbong server.
+
+    Dito nabubuhay ang dating bug: ang lumang URL ang laman ng QR kaya
+    error 1033 ang nakukuha ng bisita.
+    """
+    round_id = await make_round(client, operator_headers)
+    first = "https://old-dead-tunnel.trycloudflare.com"
+    second = "https://brand-new-tunnel.trycloudflare.com"
+
+    one = await client.post(
+        f"{first}/api/pairing", json={"round_id": round_id}, headers=operator_headers
+    )
+    two = await client.post(
+        f"{second}/api/pairing", json={"round_id": round_id}, headers=operator_headers
+    )
+
+    assert one.json()["pair_url"].startswith(f"{first}/pair/")
+    assert two.json()["pair_url"].startswith(f"{second}/pair/")
+
+
+async def test_lan_host_is_used_as_is(
+    client: AsyncClient, operator_headers: dict[str, str]
+) -> None:
+    round_id = await make_round(client, operator_headers)
+    pairing = await client.post(
+        "http://192.168.1.185:8000/api/pairing",
+        json={"round_id": round_id},
+        headers=operator_headers,
+    )
+    assert pairing.json()["pair_url"].startswith("http://192.168.1.185:8000/pair/")
+
+
+async def test_localhost_host_falls_back_to_config(
+    client: AsyncClient, operator_headers: dict[str, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Hindi puwedeng gamitin ang localhost: ang phone ang magiging localhost."""
+    from app.config import get_settings
+
+    monkeypatch.setattr(get_settings(), "public_base_url", "http://192.168.1.99:8000")
+    round_id = await make_round(client, operator_headers)
+
+    for loopback in ("http://127.0.0.1:8000", "http://localhost:8000"):
+        pairing = await client.post(
+            f"{loopback}/api/pairing", json={"round_id": round_id}, headers=operator_headers
+        )
+        assert pairing.json()["pair_url"].startswith("http://192.168.1.99:8000/pair/")
