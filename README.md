@@ -228,6 +228,19 @@ authtoken, and register it once:
 ngrok config add-authtoken YOUR_AUTHTOKEN_HERE
 ```
 
+Keep the agent current. ngrok retires old agent versions, and once a version is
+past its deadline it stops connecting entirely rather than warning you. Check and
+update with:
+
+```powershell
+ngrok version
+winget upgrade --id Ngrok.Ngrok   # if you installed it with winget
+ngrok update                      # only if you installed it manually
+```
+
+Do not use `ngrok update` on a package-manager install; ngrok's own docs advise
+against it because the two will fight over the binary.
+
 Then:
 
 ```powershell

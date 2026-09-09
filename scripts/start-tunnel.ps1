@@ -319,6 +319,11 @@ try {
         }
         if ($Provider -eq 'ngrok') {
             Write-Note 'Kung may sinasabing authentication: ngrok config add-authtoken <token>'
+            Write-Note 'Kung may sinasabing version o update: luma na ang agent mo.'
+            Write-Note '  Tinatanggihan ng ngrok ang mga lumang agent version.'
+            Write-Note '  winget upgrade --id Ngrok.Ngrok    (kung winget ang gamit)'
+            Write-Note '  ngrok update                       (kung manual download)'
+            Write-Note "  Kasalukuyang version: $(& $binary.Source version 2>&1 | Select-Object -First 1)"
         } else {
             Write-Note 'Subukan ang ngrok: .\scripts\start-tunnel.ps1 -StartServer -Provider ngrok'
         }
