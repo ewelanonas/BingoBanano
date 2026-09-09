@@ -25,7 +25,11 @@
 
   {% if free_marking %}
   <p class="hint">
-    Tap your numbers as the host calls them. Tap again to undo a mistake.
+    Tap your numbers as the host calls them. Tap again to undo a mistake. Your
+    marks are saved on this phone, so closing the tab will not lose them.
+  </p>
+  <p>
+    <button id="clear-marks" type="button" class="btn ghost">Clear all marks</button>
   </p>
   {% else %}
   <div class="field checkbox daub-toggle">
@@ -99,6 +103,28 @@
   const drawn = new Set();
   const marked = new Set();
 
+  // Ang mga marka ay presentation state lang, kaya sa phone ito naka-store at
+  // hindi sa server. Mahalaga ito sa cards-only mode: walang binibilang ang
+  // server doon, kaya kapag nawala ang tab ay wala nang makakabawi ng marka.
+  const STORAGE_KEY = `bingobanano.marks.${TOKEN}`;
+
+  function saveMarks() {
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify([...marked]));
+    } catch (err) {
+      // Puwedeng bawal ang storage sa private browsing. Hindi ito sagabal.
+    }
+  }
+
+  function loadSavedMarks() {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      return raw ? JSON.parse(raw) : [];
+    } catch (err) {
+      return [];
+    }
+  }
+
   function cellsFor(ball) {
     return document.querySelectorAll(`td[data-ball="${ball}"]`);
   }
@@ -117,6 +143,19 @@
   function setMarked(ball, on) {
     if (on) { marked.add(ball); } else { marked.delete(ball); }
     paint(ball);
+    updateMissing();
+    saveMarks();
+  }
+
+  function restoreMarks() {
+    for (const ball of loadSavedMarks()) {
+      // Sa mode na may binibilang, ang marka ay dapat manatiling subset ng
+      // aktuwal na nailabas. Kung hindi, puwedeng umilaw ang BINGO button sa
+      // card na hindi talaga panalo.
+      if (!FREE_MARKING && !drawn.has(ball)) { continue; }
+      marked.add(ball);
+      paint(ball);
+    }
     updateMissing();
   }
 
@@ -170,6 +209,18 @@
     });
   }
 
+  const clearButton = document.getElementById("clear-marks");
+  if (clearButton) {
+    clearButton.addEventListener("click", () => {
+      const previous = [...marked];
+      marked.clear();
+      for (const ball of previous) { paint(ball); }
+      updateMissing();
+      saveMarks();
+      messageEl.textContent = "Marks cleared.";
+    });
+  }
+
   if (autoDaub) {
     autoDaub.addEventListener("change", () => {
       if (!autoDaub.checked) { return; }
@@ -189,6 +240,9 @@
     }
   });
 
+  // Sa cards-only mode ay walang snapshot na hihintayin bago maibalik ang marka.
+  if (FREE_MARKING) { restoreMarks(); }
+
   const scheme = location.protocol === "https:" ? "wss:" : "ws:";
   const socket = new WebSocket(`${scheme}//${location.host}/api/play/${TOKEN}/events`);
 
@@ -198,7 +252,9 @@
       for (const ball of payload.drawn) { registerDraw(ball); }
       if (lastCallEl) { lastCallEl.textContent = payload.last_call || "--"; }
       if (drawCountEl) { drawCountEl.textContent = payload.draw_count; }
-      updateMissing();
+      // Pagkatapos malaman ang aktuwal na nailabas, doon ibabalik ang naka-save
+      // na marka — para masala ang hindi pa natawag sa mode na may binibilang.
+      restoreMarks();
     } else if (payload.event === "ball_drawn") {
       registerDraw(payload.ball);
       if (lastCallEl) { lastCallEl.textContent = payload.call; }

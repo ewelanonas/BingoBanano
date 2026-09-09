@@ -225,7 +225,7 @@ async def test_offline_player_board_allows_free_marking(
     client: AsyncClient, operator_headers: dict[str, str]
 ) -> None:
     game = await make_mode_round(client, operator_headers, "offline")
-    token = await join(client, operator_headers, game["id"])
+    token = await join(client, operator_headers, game["id"], card_count=2)
 
     page = await client.get(f"/play/{token}")
     assert page.status_code == 200
@@ -233,6 +233,48 @@ async def test_offline_player_board_allows_free_marking(
     assert "Tap your numbers as the host calls them" in page.text
     # Walang auto-daub toggle: walang binibilang na dapat sabayan.
     assert 'id="auto-daub"' not in page.text
+
+    # Bawat numero sa dalawang card ay pinipindot: 24 kada card.
+    assert page.text.count('class="dab"') == 48
+    assert page.text.count('aria-pressed="false"') == 48
+
+
+async def test_offline_marks_survive_a_closed_tab(
+    client: AsyncClient, operator_headers: dict[str, str]
+) -> None:
+    """Walang binibilang ang server dito, kaya sa phone naka-save ang marka.
+
+    Kung hindi, mawawala ang bawat pindot kapag nag-lock ang phone o nag-reload
+    ang tab, at wala nang paraan para maibalik.
+    """
+    game = await make_mode_round(client, operator_headers, "offline")
+    token = await join(client, operator_headers, game["id"])
+
+    page = await client.get(f"/play/{token}")
+    # Ang key ay nakabase sa play token, kaya hiwalay ang marka kada laro.
+    assert "bingobanano.marks." in page.text
+    assert "localStorage.setItem" in page.text
+    assert "localStorage.getItem" in page.text
+    # May paraan ding burahin lahat, dahil normal ang mali-mali sa malayang pagpindot.
+    assert 'id="clear-marks"' in page.text
+    assert "Clear all marks" in page.text
+
+
+async def test_tracked_modes_filter_restored_marks(
+    client: AsyncClient, operator_headers: dict[str, str]
+) -> None:
+    """Ang naka-save na marka ay hindi puwedeng lumampas sa aktuwal na nailabas.
+
+    Kung hindi ito sinala, puwedeng umilaw ang BINGO button sa card na hindi
+    talaga panalo.
+    """
+    game = await make_mode_round(client, operator_headers, "auto")
+    token = await join(client, operator_headers, game["id"], name="Tracked")
+
+    page = await client.get(f"/play/{token}")
+    assert "if (!FREE_MARKING && !drawn.has(ball)) { continue; }" in page.text
+    # Walang clear button sa mode na may binibilang: awtomatiko naman ang marka.
+    assert 'id="clear-marks"' not in page.text
 
 
 async def test_tracked_modes_do_not_allow_free_marking(

@@ -189,7 +189,11 @@ why their BINGO was rejected. Cells that were called but not yet dabbed are
 outlined, so it is easy to catch up.
 
 In cards-only mode there is nothing to check a tap against, so guests can mark
-anything freely and the refusal does not apply.
+anything freely and the refusal does not apply. Their marks are saved on their own
+phone, so a locked screen or a closed tab does not wipe the card — which matters
+because in that mode the server does not know the numbers and could not rebuild
+them. There is a **Clear all marks** button for when the tapping gets away from
+someone.
 
 If two players complete the pattern on the same ball, both win — co-winners, the
 same way a real bingo hall handles it.
@@ -439,7 +443,7 @@ app/
   services/    # pairing, rounds, issuance, audit, events
   api/         # HTTP and WebSocket routes
   web/         # Jinja2 templates and CSS
-tests/         # 121 tests
+tests/         # 123 tests
 scripts/       # setup-dev.ps1, start-tunnel.ps1
 ```
 
@@ -502,7 +506,7 @@ cannot use, so that falls back to `BINGO_PUBLIC_BASE_URL`.
 ## Development
 
 ```powershell
-.\.venv\Scripts\python.exe -m pytest -q          # 121 tests
+.\.venv\Scripts\python.exe -m pytest -q          # 123 tests
 .\.venv\Scripts\python.exe -m ruff check .
 .\.venv\Scripts\python.exe -m ruff format .
 .\.venv\Scripts\python.exe -m mypy               # strict on app/domain
