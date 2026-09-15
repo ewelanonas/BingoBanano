@@ -31,6 +31,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings
 from app.db.models import SONG_FAILED, SONG_QUEUED, Player, SongRequest
+from app.domain.rng import new_play_token
 from app.services import spotify
 from app.services.identity import utcnow
 
@@ -249,6 +250,33 @@ def reset() -> None:
     _now_playing.invalidate()
 
 
+async def create_guest(db: AsyncSession, *, nickname: str) -> Player:
+    """Bisitang pumasok sa radio QR at walang bingo card.
+
+    Parehong `Player` row gaya ng bumunot ng cards, at hindi bagong table.
+    Palayaw lang ang naitatala, kagaya ng dati, at ang `play_token` ang siyang
+    capability URL niya papunta sa radio.
+
+    Isang `Player` na walang card ay ligtas: ang `/play/{token}` ay 404 kapag
+    walang cards, at ang history ay nakalista ayon sa card, kaya hindi lumilitaw
+    ang taong ito sa mga bingo page.
+    """
+    player = Player(
+        given_name=nickname[:64],
+        play_token=new_play_token(),
+        created_at=utcnow(),
+    )
+    db.add(player)
+    await db.flush()
+    return player
+
+
+async def guest_by_token(db: AsyncSession, token: str | None) -> Player | None:
+    if not token:
+        return None
+    return await db.scalar(select(Player).where(Player.play_token == token))
+
+
 async def guard_request(
     db: AsyncSession,
     settings: Settings,
@@ -392,10 +420,12 @@ __all__ = [
     "RadioNotConnected",
     "RadioStatus",
     "StateStore",
+    "create_guest",
     "get_connection_store",
     "get_now_playing_cache",
     "get_state_store",
     "guard_request",
+    "guest_by_token",
     "now_playing_payload",
     "recent_requests",
     "record_request",

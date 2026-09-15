@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% block title %}Banano Radio{% endblock %}
+
+{% block content %}
+<section class="card panel">
+  <h1>Banano Radio</h1>
+
+  {% if not live %}
+  <p class="alert" role="status">
+    The radio is off right now. Ask the host to switch it on, then scan again.
+  </p>
+  {% else %}
+  <p class="muted">
+    Pick songs for the party. They go into the queue on the speaker.
+  </p>
+
+  {% if error %}
+  <p class="alert" role="alert">{{ error }}</p>
+  {% endif %}
+
+  <form method="post" action="/radio/join" class="stack">
+    <div class="field">
+      <label for="given_name">Your nickname</label>
+      <input id="given_name" name="given_name" type="text" required maxlength="64"
+             autocomplete="nickname" autofocus>
+      <p class="hint">This is the name shown next to the songs you pick.</p>
+    </div>
+
+    <button type="submit" class="btn primary">Start picking songs</button>
+  </form>
+
+  <p class="hint">
+    Already joined on this phone? This page sends you straight back to your own
+    list.
+  </p>
+  {% endif %}
+</section>
+{% endblock %}

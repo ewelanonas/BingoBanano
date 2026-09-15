@@ -21,9 +21,11 @@ import contextlib
 from typing import Annotated, Any
 from urllib.parse import urlsplit
 
+import segno
 from fastapi import (
     APIRouter,
     Depends,
+    Form,
     HTTPException,
     Request,
     Response,
@@ -38,10 +40,12 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import templates
+from app.api.pairing import resolve_base_url
 from app.api.security import (
     OPERATOR_COOKIE,
     enforce_rate_limit,
     get_session_store,
+    is_secure_request,
     require_operator,
 )
 from app.config import RadioNotConfiguredError, Settings, get_settings
@@ -53,6 +57,17 @@ from app.services.events import get_broker
 router = APIRouter()
 
 _WS_PING_SECONDS = 20.0
+
+# Naaalala ng cookie kung sino ang bisita, para sa pagbalik niya sa radio.
+#
+# Ito rin ang tanging humahawak sa cooldown. Kung walang cookie, ang bawat
+# pag-scan ay bagong `Player` at bagong sariwang cooldown, kaya wala nang saysay
+# ang paghihintay. Hindi ito hadlang sa taong sadyang magbubura ng cookie —
+# pero party ito at hindi casino, at ang alternatibong per-IP na cooldown ay
+# mali: sa likod ng tunnel o ng isang Wi-Fi, isang IP lang ang lahat ng bisita,
+# kaya ang isang tao ay makakabara sa buong party.
+RADIO_COOKIE = "bb_radio"
+_RADIO_COOKIE_MAX_AGE = 60 * 60 * 12
 
 # Ang mga ito ay problema sa dulong Spotify, hindi sa panuntunan natin. Ibang
 # HTTP status para malaman ng host kung sino ang dapat aksyunan.
@@ -176,11 +191,19 @@ async def radio_console(
     store = radio.get_connection_store()
     state = store.status(settings)
 
+    # Isang QR para sa lahat, at hindi isa kada bisita. Ang pairing QR ay
+    # single-use dahil may cards na ipinapamigay at dapat pantay iyon; ang radio
+    # ay wala namang ipinapamigay, kaya i-tape lang ito sa pinto.
+    join_url = _radio_join_url(resolve_base_url(request, settings))
+    qr = segno.make(join_url, error="m") if state.connected else None
+
     return templates.TemplateResponse(
         request,
         "operator_radio.html",
         {
             "csrf_token": session.csrf_token,
+            "join_url": join_url,
+            "join_qr": qr.svg_data_uri(scale=6, dark="#101828", light="#ffffff") if qr else "",
             "configured": state.configured,
             "connected": state.connected,
             "accepting": state.accepting,
@@ -373,6 +396,121 @@ async def disconnect(db: Annotated[AsyncSession, Depends(get_db)]) -> dict[str, 
     await db.commit()
     await get_broker().publish(radio.RADIO_TOPIC, {"event": "radio_closed"})
     return {"connected": False}
+
+
+# --------------------------------------------------------------------------
+# Bisita: pagsali sa radio
+# --------------------------------------------------------------------------
+
+
+def _radio_join_url(base_url: str) -> str:
+    return f"{base_url.rstrip('/')}/radio"
+
+
+def _set_guest_cookie(response: Response, request: Request, play_token: str) -> None:
+    response.set_cookie(
+        RADIO_COOKIE,
+        play_token,
+        max_age=_RADIO_COOKIE_MAX_AGE,
+        httponly=True,
+        # `lax` at hindi `strict`: ang QR ay binubuksan ng camera app, kaya ang
+        # unang navigation ay hindi galing sa page natin. Sa `strict`, ang
+        # pagbalik ng bisita sa naka-bookmark na link ay hindi magpapadala ng
+        # cookie at magiging bagong tao siya kada beses.
+        samesite="lax",
+        secure=is_secure_request(request),
+        path="/",
+    )
+
+
+@router.get("/radio", response_class=HTMLResponse, include_in_schema=False)
+async def radio_join_page(
+    request: Request,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    error: str | None = None,
+) -> Response:
+    """Ang page na bumubukas kapag in-scan ang radio QR.
+
+    Hindi tulad ng pairing QR, ang isang ito ay muling nagagamit at hindi
+    nag-e-expire: isang QR na naka-tape sa pinto, at kahit sino ay puwedeng
+    sumali. Wala namang ipinapamigay dito na kailangang pantay-pantay — ang
+    bingo cards ay may sariling single-use QR pa rin.
+    """
+    known = await radio.guest_by_token(db, request.cookies.get(RADIO_COOKIE))
+    if known is not None:
+        # Nakasali na siya. Diretso na sa sarili niyang radio page.
+        return RedirectResponse(f"/radio/{known.play_token}", status_code=status.HTTP_303_SEE_OTHER)
+
+    if not radio.get_connection_store().connected:
+        return templates.TemplateResponse(
+            request,
+            "radio_join.html",
+            {"live": False, "error": None},
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        )
+
+    return templates.TemplateResponse(
+        request,
+        "radio_join.html",
+        {"live": True, "error": error},
+    )
+
+
+@router.post("/radio/join", response_class=HTMLResponse, include_in_schema=False)
+async def radio_join(
+    request: Request,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    given_name: Annotated[str, Form(min_length=1, max_length=64)],
+) -> Response:
+    settings = get_settings()
+    # Bukas ito sa kahit sino na may QR, at gumagawa ito ng row sa database.
+    # Dito ang panangga.
+    enforce_rate_limit(
+        request,
+        bucket="radio_join",
+        limit=settings.radio_join_rate_limit_per_minute,
+    )
+
+    if not radio.get_connection_store().connected:
+        # Fail closed. Walang saysay gumawa ng Player kung patay ang radio.
+        return templates.TemplateResponse(
+            request,
+            "radio_join.html",
+            {"live": False, "error": None},
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        )
+
+    known = await radio.guest_by_token(db, request.cookies.get(RADIO_COOKIE))
+    if known is not None:
+        response: Response = RedirectResponse(
+            f"/radio/{known.play_token}", status_code=status.HTTP_303_SEE_OTHER
+        )
+        _set_guest_cookie(response, request, known.play_token)
+        return response
+
+    nickname = given_name.strip()
+    if not nickname:
+        return templates.TemplateResponse(
+            request,
+            "radio_join.html",
+            {"live": True, "error": "Please enter a nickname."},
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+        )
+
+    player = await radio.create_guest(db, nickname=nickname)
+    await audit.record(
+        db,
+        event="radio.join",
+        outcome=audit.OUTCOME_OK,
+        player_id=player.id,
+    )
+    await db.commit()
+
+    response = RedirectResponse(
+        f"/radio/{player.play_token}", status_code=status.HTTP_303_SEE_OTHER
+    )
+    _set_guest_cookie(response, request, player.play_token)
+    return response
 
 
 # --------------------------------------------------------------------------

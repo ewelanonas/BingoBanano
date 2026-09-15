@@ -564,6 +564,170 @@ async def test_guest_page_hides_search_when_radio_is_off(
     assert "The radio is off right now" in page.text
 
 
+# --------------------------------------------------------------------------
+# Ang generic na radio QR
+# --------------------------------------------------------------------------
+
+
+async def test_join_page_is_closed_when_radio_is_off(configured: AsyncClient) -> None:
+    """Fail closed: walang Player na nagagawa kapag patay ang radio."""
+    page = await configured.get("/radio")
+    assert page.status_code == 503
+    assert "The radio is off right now" in page.text
+
+    joined = await configured.post("/radio/join", data={"given_name": "Ana"})
+    assert joined.status_code == 503
+
+    async with get_session_factory()() as db:
+        assert await db.scalar(select(Player.id)) is None
+
+
+async def test_guest_joins_the_radio_without_a_bingo_card(
+    configured: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Ang buong punto ng generic QR: walang bingo, tugtog lang."""
+    connect_store()
+    queued = stub_spotify(monkeypatch)
+
+    landing = await configured.get("/radio")
+    assert landing.status_code == 200
+    assert "Start picking songs" in landing.text
+
+    joined = await configured.post("/radio/join", data={"given_name": "Ana"})
+    assert joined.status_code == 303
+    token = joined.headers["location"].removeprefix("/radio/")
+    assert token
+
+    # Ang bisitang ito ay walang card, kaya patay ang bingo board niya. Iyon ang
+    # tama, at hindi ito dapat pumigil sa radio.
+    assert (await configured.get(f"/play/{token}")).status_code == 404
+
+    radio_page = await configured.get(f"/radio/{token}")
+    assert radio_page.status_code == 200
+    assert "Search for a song" in radio_page.text
+
+    picked = await configured.post(f"/api/radio/{token}/request", json={"track_uri": TRACK.uri})
+    assert picked.status_code == 200, picked.text
+    assert queued == [TRACK.uri]
+
+
+async def test_join_qr_is_reusable(configured: AsyncClient) -> None:
+    """Hindi single-use ang QR na ito, kaya maraming bisita ang puwedeng sumali.
+
+    Kailangang malinis ang cookie sa pagitan, dahil isang phone ang
+    kinakatawan ng isang cookie jar.
+    """
+    connect_store()
+    tokens = set()
+    for name in ["Ana", "Ben", "Cely"]:
+        joined = await configured.post("/radio/join", data={"given_name": name})
+        assert joined.status_code == 303
+        tokens.add(joined.headers["location"].removeprefix("/radio/"))
+        configured.cookies.clear()
+
+    assert len(tokens) == 3
+
+
+async def test_returning_guest_keeps_the_same_identity(configured: AsyncClient) -> None:
+    """Ang cookie ang humahawak sa cooldown.
+
+    Kung bagong `Player` kada scan, ang cooldown ay walang saysay: sapat na ang
+    muling pag-scan para makakuha ng bagong turn.
+    """
+    connect_store()
+    first = await configured.post("/radio/join", data={"given_name": "Ana"})
+    token = first.headers["location"].removeprefix("/radio/")
+
+    # Muling pag-scan ng QR sa parehong phone.
+    again = await configured.get("/radio")
+    assert again.status_code == 303
+    assert again.headers["location"] == f"/radio/{token}"
+
+    # At ang pag-submit muli ng form ay hindi gumagawa ng pangalawang tao.
+    resubmit = await configured.post("/radio/join", data={"given_name": "Ana Impostor"})
+    assert resubmit.status_code == 303
+    assert resubmit.headers["location"] == f"/radio/{token}"
+
+    async with get_session_factory()() as db:
+        players = (await db.execute(select(Player))).scalars().all()
+        assert len(players) == 1
+        assert players[0].given_name == "Ana"
+
+
+async def test_cooldown_survives_a_rescan(
+    configured: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    connect_store()
+    queued = stub_spotify(monkeypatch)
+    joined = await configured.post("/radio/join", data={"given_name": "Ana"})
+    token = joined.headers["location"].removeprefix("/radio/")
+
+    assert (
+        await configured.post(f"/api/radio/{token}/request", json={"track_uri": TRACK.uri})
+    ).status_code == 200
+
+    # Muling pag-scan, tapos subok muli. Parehong tao pa rin, kaya cooldown pa rin.
+    rescan = await configured.get("/radio")
+    same_token = rescan.headers["location"].removeprefix("/radio/")
+    assert same_token == token
+
+    second = await configured.post(
+        f"/api/radio/{same_token}/request", json={"track_uri": OTHER_TRACK.uri}
+    )
+    assert second.status_code == 409
+    assert queued == [TRACK.uri]
+
+
+async def test_join_cookie_is_httponly(configured: AsyncClient) -> None:
+    """Walang JavaScript na kailangang humawak sa capability token."""
+    connect_store()
+    joined = await configured.post("/radio/join", data={"given_name": "Ana"})
+    cookie_header = joined.headers["set-cookie"]
+    assert "bb_radio=" in cookie_header
+    assert "HttpOnly" in cookie_header
+    # `lax` at hindi `strict`: ang QR ay binubuksan ng camera app ng phone.
+    assert "SameSite=lax" in cookie_header
+
+
+async def test_join_is_rate_limited(
+    configured: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Ang endpoint na gumagawa ng row at bukas sa kahit sino ay may hangganan."""
+    monkeypatch.setenv("BINGO_RADIO_JOIN_RATE_LIMIT_PER_MINUTE", "3")
+    get_settings.cache_clear()
+    connect_store()
+
+    codes = []
+    for index in range(5):
+        response = await configured.post("/radio/join", data={"given_name": f"Guest{index}"})
+        codes.append(response.status_code)
+        configured.cookies.clear()
+
+    assert codes[:3] == [303, 303, 303]
+    assert codes[3:] == [429, 429]
+
+
+async def test_host_console_shows_the_join_qr(configured: AsyncClient) -> None:
+    from tests.conftest import TEST_API_KEY
+
+    await configured.post("/operator/session", data={"api_key": TEST_API_KEY})
+    connect_store()
+
+    page = await configured.get("/operator/radio")
+    assert page.status_code == 200
+    assert "data:image/svg+xml" in page.text
+
+    # Ang QR ay dumadaan sa parehong base-URL resolution gaya ng pairing QR:
+    # galing sa address na binuksan ng host, hindi sa `.env`. Ganito, ang
+    # tunnel URL ay hindi kailangang isulat kahit saan.
+    assert "http://testserver/radio" in page.text
+
+    tunneled = await configured.get(
+        "/operator/radio", headers={"Host": "disk-propose-financial.ngrok-free.dev"}
+    )
+    assert "http://disk-propose-financial.ngrok-free.dev/radio" in tunneled.text
+
+
 async def test_disconnect_clears_the_connection(
     configured: AsyncClient, operator_headers: dict[str, str]
 ) -> None:

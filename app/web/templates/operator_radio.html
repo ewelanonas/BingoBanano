@@ -93,12 +93,31 @@
     <button type="button" id="disconnect" class="btn ghost">Disconnect Spotify</button>
   </div>
   <p class="hint">
-    Guests reach the radio from their own card page, so the link is already in
-    their hands. Each guest waits {{ cooldown_seconds }}s between picks, and
-    tracks longer than {{ max_track_minutes }} minutes are refused.
+    Each guest waits {{ cooldown_seconds }}s between picks, and tracks longer
+    than {{ max_track_minutes }} minutes are refused.
   </p>
   {% endif %}
 </section>
+
+{% if connected %}
+<section class="panel">
+  <h2 class="section-title">The song QR</h2>
+  <p class="muted">
+    One QR for everybody. Show it on screen or print it and tape it near the
+    speaker. Guests scan it with the normal camera app, enter a nickname, and
+    start picking. No Spotify account, no app, no bingo card needed.
+  </p>
+  <div class="qr-wrap">
+    <img src="{{ join_qr }}" alt="QR code that opens Banano Radio" width="260" height="260">
+    <p class="hint"><code class="setup-code">{{ join_url }}</code></p>
+  </div>
+  <p class="hint">
+    Unlike the bingo QR, this one does not expire and is not single-use. Guests
+    who are already playing bingo also have a Banano Radio link at the top of
+    their card page.
+  </p>
+</section>
+{% endif %}
 
 <section class="panel">
   <h2 class="section-title">Requests</h2>
