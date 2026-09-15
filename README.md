@@ -41,6 +41,8 @@ photos on the cards come from his party. Happy 1st birthday, Eli.
   already on, cropped and stripped of camera metadata on the way in
 - **Rounds survive navigation** — opening the caller screen and going back to the
   lobby no longer looks like it wiped your round
+- **Banano Radio** — connect your own Spotify once and guests pick songs from
+  their phones straight into the party queue. Optional; needs Premium
 
 ## Requirements
 
@@ -537,10 +539,129 @@ Everything lives in `.env`, prefixed with `BINGO_`.
 | `BINGO_PAIRING_RATE_LIMIT_PER_MINUTE` | `20` | Limit on creating and claiming QRs |
 | `BINGO_BINGO_RATE_LIMIT_PER_MINUTE` | `120` | Limit on pressing BINGO |
 | `BINGO_LOGIN_RATE_LIMIT_PER_MINUTE` | `10` | Limit on host sign-in attempts |
+| `BINGO_SPOTIFY_CLIENT_ID` | none | Banano Radio. Blank turns the radio off |
+| `BINGO_SPOTIFY_CLIENT_SECRET` | none | Banano Radio. Blank turns the radio off |
+| `BINGO_SPOTIFY_REDIRECT_URI` | `http://127.0.0.1:8000/operator/radio/callback` | Must match the Spotify dashboard exactly |
+| `BINGO_RADIO_REQUEST_COOLDOWN_SECONDS` | `120` | Wait between picks, per guest |
+| `BINGO_RADIO_MAX_TRACK_SECONDS` | `600` | Longest track a guest may pick |
+| `BINGO_RADIO_DUPLICATE_WINDOW_MINUTES` | `60` | How long a picked song blocks a repeat |
 
 `BINGO_OPERATOR_API_KEY` has no default. If it is missing or shorter than 32
 characters the app refuses to start. That is deliberate: better not to run at all
 than to run wide open.
+
+The Spotify settings are different: blank is a valid state. Without them the radio
+is simply off and everything else works.
+
+## Banano Radio
+
+Guests pick songs from their phones and they go into the queue on your speaker.
+
+Only **you** connect to Spotify. Guests need no Spotify account, no login, and no
+app — they get to the radio from a link on their own card page. That is also what
+keeps this inside Spotify's Development Mode limits, which allow five
+authenticated users per app: we use one.
+
+### What you need
+
+- **Spotify Premium** on the account that plays the music. Adding to the playback
+  queue is Premium-only, and Spotify also requires the owner of a Development
+  Mode app to be a subscriber. There is no way around either.
+- A free Spotify developer app, created once.
+
+### Setup, once
+
+1. Go to `developer.spotify.com/dashboard`, sign in with the account that will
+   play the music, and create an app.
+2. Add this exact **Redirect URI**:
+
+   ```
+   http://127.0.0.1:8000/operator/radio/callback
+   ```
+
+   It has to match character for character. Loopback is deliberate: Spotify no
+   longer accepts `localhost`, and it will not accept plain HTTP for anything
+   else. It also means a Cloudflare tunnel URL never has to be registered, so
+   the radio keeps working when the tunnel changes address.
+
+   See [Using a tunnel URL instead](#using-a-tunnel-url-instead) if you would
+   rather connect from your phone.
+3. Put the Client ID and Client Secret in `.env`:
+
+   ```
+   BINGO_SPOTIFY_CLIENT_ID=...
+   BINGO_SPOTIFY_CLIENT_SECRET=...
+   ```
+4. Restart the server.
+
+### Running it
+
+1. Open Spotify on the speaker and **play something**. Requests land in the queue
+   of the device that is already playing, so with nothing playing there is nowhere
+   for a song to go. You will see `no active device` if you skip this.
+2. Sign in as host, open **Radio** in the lobby header, press **Connect Spotify**,
+   and approve. This step must be done from a browser on the machine running the
+   server, because the callback is a loopback address.
+3. Guests now see a **Banano Radio** link at the top of their card page.
+
+From the Radio page you can see what is playing, skip a track, watch every pick
+come in, and **Close requests** when the party is winding down.
+
+### Using a tunnel URL instead
+
+The loopback URI means the Connect step has to happen in a browser on the machine
+running the server. If you would rather do it from your phone, register your
+tunnel URL as a second Redirect URI.
+
+This only works with a **stable** URL. A `trycloudflare.com` address is different
+on every run, so it would need re-registering every time. An **ngrok dev domain**
+is auto-assigned to your account and stays yours, so it is worth registering:
+
+```
+https://your-domain.ngrok-free.dev/operator/radio/callback
+```
+
+Register both URIs in the Spotify dashboard, then point `.env` at whichever you
+are actually using:
+
+```
+BINGO_SPOTIFY_REDIRECT_URI=https://your-domain.ngrok-free.dev/operator/radio/callback
+```
+
+Two things to know:
+
+- **Open `/operator` on the ngrok URL before connecting.** ngrok's free plan
+  serves a browser warning page on the first visit to an endpoint, and it cannot
+  be bypassed with a header on that plan. Loading the lobby first clears it for
+  the rest of the session, so the callback lands on the app instead of the
+  warning. Use the same browser for both.
+- **The tunnel has to be running.** With the loopback URI, connecting works with
+  no tunnel at all.
+
+If the address you are browsing and the address in `.env` do not match, the Radio
+page says so before you press Connect. Left unchecked, Spotify answers with
+`INVALID_CLIENT: Invalid redirect URI` and does not say which part is wrong.
+
+### Guardrails
+
+- One pick per guest every 120 seconds, so nobody becomes the sole DJ
+- Nothing longer than 10 minutes
+- A song cannot be requested again for 60 minutes
+- Rate limits on search and on requests, by IP
+- Requests that Spotify refuses are recorded too, so a silent speaker has a
+  visible reason on the Radio page
+
+### The one rough edge
+
+The Spotify refresh token is held **in memory only**, never written to disk. It is
+six months of access to your Spotify playback, and this app has no encryption at
+rest and stores its data in a plain SQLite file, so putting it there would be
+worse than the inconvenience of not.
+
+The cost: restarting the server means pressing **Connect Spotify** again. That
+includes the auto-reload that fires when you edit a file, so avoid `--reload`
+during an actual party. Your rounds and cards are in the database and are not
+affected.
 
 ## How it is built
 
@@ -548,10 +669,10 @@ than to run wide open.
 app/
   domain/      # pure logic: cards, patterns, draws, RNG. No I/O.
   db/          # SQLAlchemy models and session
-  services/    # pairing, rounds, issuance, audit, events
+  services/    # pairing, rounds, issuance, audit, events, radio, spotify
   api/         # HTTP and WebSocket routes
   web/         # Jinja2 templates and CSS
-tests/         # 135 tests
+tests/         # 206 tests
 scripts/       # setup-dev.ps1, start-tunnel.ps1
 ```
 
@@ -559,7 +680,8 @@ scripts/       # setup-dev.ps1, start-tunnel.ps1
 functions only, which keeps it easy to test.
 
 Stack: FastAPI, Pydantic v2, SQLAlchemy 2.x async, SQLite, segno for QR
-generation, Jinja2 and vanilla JS on the front end. No build step.
+generation, httpx for the Spotify calls, Jinja2 and vanilla JS on the front end.
+No build step.
 
 ### Decisions worth knowing
 
@@ -624,10 +746,27 @@ tunnels needs no restart and no config edit, and why a stale URL cannot linger a
 silently produce dead QR codes. The one exception is `localhost`, which a phone
 cannot use, so that falls back to `BINGO_PUBLIC_BASE_URL`.
 
+**Song metadata comes from Spotify, not from the phone.** A guest's phone sends
+only a track URI. The server fetches the title, artist and length itself, because
+a length supplied by the client could just be a lie, and the 10-minute cap would
+be a suggestion rather than a limit.
+
+**Only the host authenticates with Spotify.** Guests hold no token and need no
+account. That is what makes the radio work inside Spotify's five-user Development
+Mode allowance, and it means a guest's phone never handles a credential.
+
+**Refused song requests are still recorded.** A silent speaker with an empty
+Radio page tells the host nothing. With the failure written down, the reason —
+usually no active device — is on screen.
+
+**Whether the radio is on is not something a guest can see the reason for.** The
+guest page says the radio is off and nothing else. Missing credentials and a host
+who has not connected look identical from the outside.
+
 ## Development
 
 ```powershell
-.\.venv\Scripts\python.exe -m pytest -q          # 135 tests
+.\.venv\Scripts\python.exe -m pytest -q          # 206 tests
 .\.venv\Scripts\python.exe -m ruff check .
 .\.venv\Scripts\python.exe -m ruff format .
 .\.venv\Scripts\python.exe -m mypy               # strict on app/domain

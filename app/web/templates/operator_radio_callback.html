@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+{% block title %}Banano Radio - BingoBanano{% endblock %}
+
+{% block content %}
+<section class="panel card">
+  <h1>{% if ok %}Spotify connected{% else %}Could not connect{% endif %}</h1>
+  <p class="{% if ok %}alert{% else %}muted{% endif %}" role="status">{{ message }}</p>
+  {# Anchor at hindi redirect nang sadya. Ang cookie ng host ay SameSite=strict,
+     kaya sa pindot lang ng link na ito magiging same-site ang navigation at
+     ipapadala ito ng browser. Kung redirect, mababato siya pabalik sa login. #}
+  <p><a class="btn primary" href="/operator/radio">Back to Banano Radio</a></p>
+</section>
+{% endblock %}

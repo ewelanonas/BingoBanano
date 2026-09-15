@@ -710,3 +710,98 @@ table.grid td.claimed {
   color: var(--alert-ink);
   font-weight: 700;
 }
+
+/* --- Banano Radio --- */
+
+.setup-steps { margin: 0.8rem 0 0; padding-left: 1.3rem; color: var(--muted); }
+.setup-steps li { margin: 0.5rem 0; }
+
+.setup-code {
+  display: block;
+  margin: 0.35rem 0;
+  padding: 0.45rem 0.6rem;
+  border: 1px solid var(--line);
+  border-radius: 0.4rem;
+  background: var(--bg);
+  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  font-size: 0.85rem;
+  /* Mahaba ang URI at hindi ito puwedeng mali kahit isang karakter, kaya
+     buo ito dapat na nakikita kahit sa makitid na screen. */
+  overflow-wrap: anywhere;
+}
+
+.radio-now {
+  display: flex;
+  gap: 0.8rem;
+  align-items: center;
+  margin: 1rem 0;
+  padding: 0.8rem 0.9rem;
+  border: 1px solid var(--line);
+  border-radius: 0.6rem;
+  background: var(--bg);
+}
+
+.radio-now-text { min-width: 0; }
+.radio-art { border-radius: 0.35rem; object-fit: cover; flex: none; }
+
+.radio-track {
+  margin: 0;
+  font-weight: 700;
+  /* Mahaba ang pamagat ng ibang kanta. Isang linya lang, at putulin. */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.radio-artist {
+  margin: 0.1rem 0 0;
+  font-size: 0.85rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.radio-results, .radio-feed { list-style: none; margin: 1rem 0 0; padding: 0; }
+
+.radio-result { border-bottom: 1px solid var(--line); }
+.radio-result:last-child { border-bottom: 0; }
+
+.radio-pick {
+  display: flex;
+  gap: 0.7rem;
+  align-items: center;
+  width: 100%;
+  /* Malaking tap target. Sa phone, ang maliit na button ay maling pindot. */
+  min-height: 3.6rem;
+  padding: 0.55rem 0.4rem;
+  border: 0;
+  border-radius: 0.5rem;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.radio-pick:hover { background: var(--bg); }
+.radio-pick:disabled { opacity: 0.5; cursor: progress; }
+
+.radio-result-text { display: grid; min-width: 0; }
+
+.radio-feed-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem 0.7rem;
+  align-items: baseline;
+  padding: 0.55rem 0.2rem;
+  border-bottom: 1px solid var(--line);
+}
+
+.radio-feed-row:last-child { border-bottom: 0; }
+.radio-feed-track { font-weight: 700; }
+.radio-feed-artist { font-size: 0.85rem; }
+.radio-feed-who { margin-left: auto; color: var(--muted); font-size: 0.82rem; }
+
+.radio-feed-state { color: var(--alert-ink); font-size: 0.8rem; }
+.radio-feed-row.failed { opacity: 0.6; }
+.radio-feed-row.failed .radio-feed-track { text-decoration: line-through; }
