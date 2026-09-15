@@ -47,20 +47,18 @@
 </section>
 
 <section class="panel">
-  <h2 class="section-title">Party queue</h2>
+  <h2 class="section-title">Coming up</h2>
   <ul class="radio-feed" id="feed">
     {% for item in requests %}
-    {% if item.status != 'failed' %}
-    <li class="radio-feed-row">
+    <li class="radio-feed-row" data-request-id="{{ item.id }}">
       <span class="radio-feed-track">{{ item.track_name }}</span>
       <span class="radio-feed-artist muted">{{ item.artist_name }}</span>
       <span class="radio-feed-who">{{ item.requested_by }}</span>
     </li>
-    {% endif %}
     {% endfor %}
   </ul>
   <p class="hint" id="feed-empty" {% if requests %}hidden{% endif %}>
-    Nobody has picked anything yet. Go first.
+    Nothing waiting. Go first.
   </p>
 </section>
 {% endblock %}
@@ -77,9 +75,12 @@
     // Ang bumagsak na request ay hindi ipinapakita sa mga bisita. Ang nagpadala
     // ay may sariling mensahe na; ang iba ay walang mapapala sa pagkakita ng
     // kantang hindi pumasok.
-    if (payload.status === "failed") { return; }
+    if (payload.status !== "queued") { return; }
+    if (feedEl.querySelector(`li[data-request-id="${payload.id}"]`)) { return; }
+
     const row = document.createElement("li");
     row.className = "radio-feed-row";
+    row.dataset.requestId = payload.id;
     for (const [cls, text] of [
       ["radio-feed-track", payload.track_name],
       ["radio-feed-artist muted", payload.artist_name],
@@ -90,8 +91,39 @@
       span.textContent = text;
       row.append(span);
     }
-    feedEl.prepend(row);
+    // Append, hindi prepend: ang nasa itaas ang susunod na tutugtog.
+    feedEl.append(row);
     feedEmptyEl.hidden = true;
+  }
+
+  function dropFeedRows(ids) {
+    for (const id of ids) {
+      const row = feedEl.querySelector(`li[data-request-id="${id}"]`);
+      if (row) { row.remove(); }
+    }
+    feedEmptyEl.hidden = feedEl.children.length > 0;
+  }
+
+  function renderFeed(requests) {
+    // Ang server ang may katotohanan. Ito ang nagpapalinis kapag may
+    // nalaktawang WS event.
+    feedEl.replaceChildren(...requests.map((item) => {
+      const row = document.createElement("li");
+      row.className = "radio-feed-row";
+      row.dataset.requestId = item.id;
+      for (const [cls, text] of [
+        ["radio-feed-track", item.track_name],
+        ["radio-feed-artist muted", item.artist_name],
+        ["radio-feed-who", item.requested_by],
+      ]) {
+        const span = document.createElement("span");
+        span.className = cls;
+        span.textContent = text;
+        row.append(span);
+      }
+      return row;
+    }));
+    feedEmptyEl.hidden = requests.length > 0;
   }
 
   if (LIVE) {
@@ -210,6 +242,7 @@
         artEl.hidden = !np.art_url;
         if (np.art_url) { artEl.src = np.art_url; }
       }
+      renderFeed(data.requests || []);
     }
 
     refreshNowPlaying();
@@ -222,7 +255,11 @@
   const socket = new WebSocket(`${scheme}//${location.host}/api/radio/${TOKEN}/events`);
   socket.addEventListener("message", (event) => {
     const payload = JSON.parse(event.data);
-    if (payload.event === "song_requested") { addFeedRow(payload); }
+    if (payload.event === "song_requested") {
+      addFeedRow(payload);
+    } else if (payload.event === "songs_played") {
+      dropFeedRows(payload.ids);
+    }
   });
 </script>
 {% endblock %}

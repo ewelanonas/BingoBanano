@@ -157,6 +157,28 @@ def _redirect_warnings(request: Request, settings: Settings) -> list[str]:
     ]
 
 
+async def _drop_from_queue(db: AsyncSession, playing_uri: str | None) -> None:
+    """Alisin sa queue ang mga kantang nalampasan na ng playback."""
+    played = await radio.reconcile_played(db, playing_uri=playing_uri)
+    if not played:
+        return
+    await db.commit()
+    await get_broker().publish(radio.RADIO_TOPIC, {"event": "songs_played", "ids": played})
+
+
+async def _advance_queue(db: AsyncSession, current: spotify.NowPlaying) -> None:
+    """Isabay ang paglilinis ng queue sa now-playing poll.
+
+    Dito ito nakakabit dahil nasa poll na ang kailangang datos — walang dagdag na
+    tawag sa Spotify. Ang `claim_reconcile` ang pumipigil sa pag-query kada poll:
+    iisa lang ang sagot hanggang magpalit ng kanta, at sa isang party ay
+    dose-dosenang poll iyon kada minuto mula sa host console at sa bawat phone.
+    """
+    playing_uri = current.track.uri if current.track else None
+    if radio.claim_reconcile(playing_uri):
+        await _drop_from_queue(db, playing_uri)
+
+
 def _spotify_http_error(exc: spotify.SpotifyError) -> HTTPException:
     upstream = exc.reason in _UPSTREAM_REASONS or isinstance(exc, spotify.SpotifyAuthError)
     return HTTPException(
@@ -211,7 +233,7 @@ async def radio_console(
             "redirect_uri": settings.spotify_redirect_uri,
             "cooldown_seconds": settings.radio_request_cooldown_seconds,
             "max_track_minutes": settings.radio_max_track_seconds // 60,
-            "requests": await radio.recent_requests(db),
+            "requests": await radio.pending_requests(db),
             "error": error,
             "warnings": _redirect_warnings(request, settings) if state.configured else [],
         },
@@ -342,19 +364,23 @@ async def radio_status(db: Annotated[AsyncSession, Depends(get_db)]) -> dict[str
         "account_name": state.account_name,
         "now_playing": None,
         "problem": "",
-        "requests": await radio.recent_requests(db),
+        "requests": [],
     }
     if not state.connected:
+        payload["requests"] = await radio.pending_requests(db)
         return payload
 
     try:
         current = await radio.get_now_playing_cache().get(store, settings)
         payload["now_playing"] = radio.now_playing_payload(current)
+        await _advance_queue(db, current)
     except (spotify.SpotifyError, radio.RadioError) as exc:
         # Huwag ipatumba ang buong console dahil lang sarado ang Spotify app ng
         # host. Ipakita ang dahilan at ipagpatuloy.
         payload["problem"] = str(exc)
         payload["connected"] = store.connected
+
+    payload["requests"] = await radio.pending_requests(db)
     return payload
 
 
@@ -374,11 +400,23 @@ async def set_accepting(payload: AcceptingBody) -> dict[str, bool]:
 
 
 @router.post("/api/radio/skip", dependencies=[Depends(require_operator)])
-async def skip_track() -> dict[str, bool]:
+async def skip_track(db: Annotated[AsyncSession, Depends(get_db)]) -> dict[str, bool]:
     settings = _radio_settings(for_guest=False)
     store = radio.get_connection_store()
     try:
         token = await store.access_token(settings)
+
+        # Alisin ang ni-skip habang alam pa natin kung ano iyon. Pagkatapos ng
+        # skip, ang susunod na tutugtog ay puwedeng kanta ng host mismo — walang
+        # matutugma doon, at maiiwan sa listahan ang ni-skip nang habambuhay.
+        #
+        # Sinasadyang hindi dumaan sa `claim_reconcile` na bantay: kung nakita na
+        # ng isang poll ang kantang ito, `played` na iyon at walang mababago ang
+        # tawag na ito. Ang pinoprotektahan dito ay ang kabilang kaso, kung saan
+        # ni-skip agad ang kanta bago pa may nakatingin sa kahit anong page.
+        current = await radio.get_now_playing_cache().get(store, settings)
+        await _drop_from_queue(db, current.track.uri if current.track else None)
+
         await spotify.skip_next(access_token=token)
     except radio.RadioError as exc:
         raise _radio_http_error(exc) from exc
@@ -540,7 +578,7 @@ async def radio_page(
             "accepting": store.accepting,
             "cooldown_seconds": settings.radio_request_cooldown_seconds,
             "max_track_minutes": settings.radio_max_track_seconds // 60,
-            "requests": await radio.recent_requests(db, limit=15),
+            "requests": await radio.pending_requests(db, limit=15),
         },
     )
 
@@ -689,7 +727,7 @@ async def guest_now_playing(
     store = radio.get_connection_store()
 
     if not settings.radio_configured() or not store.connected:
-        return {"live": False, "accepting": False, "now_playing": None}
+        return {"live": False, "accepting": False, "now_playing": None, "requests": []}
 
     result: dict[str, Any] = {"live": True, "accepting": store.accepting, "now_playing": None}
     with contextlib.suppress(spotify.SpotifyError, radio.RadioError):
@@ -697,6 +735,15 @@ async def guest_now_playing(
         # dapat ipakita sa bisita tungkol sa setup ng server.
         current = await radio.get_now_playing_cache().get(store, settings)
         result["now_playing"] = radio.now_playing_payload(current)
+        # Ang phone ng bisita ay nagpo-poll din, kaya lumilinis ang queue kahit
+        # sarado ang host console. Isang beses lang naman kada kanta ang
+        # aktuwal na trabaho.
+        await _advance_queue(db, current)
+
+    # Isinasama ang queue sa parehong sagot. Ang WS ang nagbibigay ng agarang
+    # pagbabago, pero kapag may nalaktawan — nawalan ng signal ang phone,
+    # halimbawa — ito ang nagpapalinis nang hindi kailangang mag-reload.
+    result["requests"] = await radio.pending_requests(db, limit=15)
     return result
 
 

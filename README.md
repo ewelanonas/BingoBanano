@@ -609,6 +609,21 @@ authenticated users per app: we use one.
 From the Radio page you can see what is playing, skip a track, watch every pick
 come in, and **Close requests** when the party is winding down.
 
+### The queue clears itself
+
+**Coming up** lists only songs still waiting, oldest first, so the top of the list
+is what plays next. A song drops off once it starts playing or gets skipped.
+
+Nothing is deleted. The row is marked as played, which keeps the hour-long block
+on repeating a song working and leaves the record intact. It just stops appearing
+in the queue, because the song that is playing already has its own panel above and
+seeing it twice is the confusing part.
+
+The clearing rides along with the now-playing poll, so it costs no extra Spotify
+calls, and it clears everything up to the current song rather than one at a time.
+That last part matters: if every page was closed for a while, one glance catches
+the list back up instead of leaving five stale songs behind.
+
 ### How guests get in
 
 Two doors, and neither needs a Spotify account, an app, or a login.
@@ -700,7 +715,7 @@ app/
   services/    # pairing, rounds, issuance, audit, events, radio, spotify
   api/         # HTTP and WebSocket routes
   web/         # Jinja2 templates and CSS
-tests/         # 214 tests
+tests/         # 224 tests
 scripts/       # setup-dev.ps1, start-tunnel.ps1
 ```
 
@@ -798,6 +813,26 @@ where they do not belong.
 Radio page tells the host nothing. With the failure written down, the reason —
 usually no active device — is on screen.
 
+**A played song is marked, not deleted.** The song_request table stays append-only,
+the same as draws and claims. Marking it keeps the repeat block honest and keeps
+the record, while taking the song out of the queue view. Deleting would have been
+less code and would have quietly broken the hour-long duplicate window the moment
+a song finished.
+
+**The queue clears up to the current song, not one at a time.** Clearing rides on
+the now-playing poll, so if nobody has a page open the clearing does not happen.
+Sweeping everything up to whatever is playing means a single glance catches up on
+however many songs went by, instead of leaving a trail of stale ones.
+
+**A track playing that nobody requested clears nothing.** When the host's own
+playlist is playing, there is no way to tell where in Spotify's queue the guest
+requests sit, so the list is left alone rather than guessed at.
+
+**Skipping is handled explicitly instead of being left to the poll.** After a skip
+the next track may be one of the host's own, which matches nothing and would leave
+the skipped song in the list forever. So the skip clears it first, while it is
+still known what was playing.
+
 **Whether the radio is on is not something a guest can see the reason for.** The
 guest page says the radio is off and nothing else. Missing credentials and a host
 who has not connected look identical from the outside.
@@ -805,7 +840,7 @@ who has not connected look identical from the outside.
 ## Development
 
 ```powershell
-.\.venv\Scripts\python.exe -m pytest -q          # 214 tests
+.\.venv\Scripts\python.exe -m pytest -q          # 224 tests
 .\.venv\Scripts\python.exe -m ruff check .
 .\.venv\Scripts\python.exe -m ruff format .
 .\.venv\Scripts\python.exe -m mypy               # strict on app/domain
