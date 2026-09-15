@@ -61,10 +61,20 @@ GAME_ELIMINATION = "elimination"
 GAME_TYPES = (GAME_CLASSIC, GAME_ELIMINATION)
 
 # Banano Radio: ano ang nangyari sa hiniling na kanta.
-#   queued  - tinanggap ng Spotify, nasa playback queue na
+#   queued  - tinanggap ng Spotify, hinihintay pa sa playback queue
+#   played  - tapos na: naabot ng playback o ni-skip ng host. Wala na sa listahan.
 #   failed  - tinanggihan ng Spotify; nasa `failure_reason` ang dahilan
+#
+# Ang row ay hindi kailanman dinedelete. Ang `played` ay nagtatanggal lang nito sa
+# ipinapakitang queue — kailangan pa rin ito ng duplicate check at ng audit.
 SONG_QUEUED = "queued"
+SONG_PLAYED = "played"
 SONG_FAILED = "failed"
+
+# Ang mga status na binibilang bilang tunay na request ng bisita. Ang `failed` ay
+# wala dito: hindi kasalanan ng bisita kung sarado ang Spotify ng host, kaya hindi
+# iyon dapat umubos ng cooldown niya.
+SONG_COUNTED = (SONG_QUEUED, SONG_PLAYED)
 
 
 def _new_id() -> str:

@@ -21,9 +21,11 @@ import contextlib
 from typing import Annotated, Any
 from urllib.parse import urlsplit
 
+import segno
 from fastapi import (
     APIRouter,
     Depends,
+    Form,
     HTTPException,
     Request,
     Response,
@@ -38,10 +40,12 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import templates
+from app.api.pairing import resolve_base_url
 from app.api.security import (
     OPERATOR_COOKIE,
     enforce_rate_limit,
     get_session_store,
+    is_secure_request,
     require_operator,
 )
 from app.config import RadioNotConfiguredError, Settings, get_settings
@@ -53,6 +57,17 @@ from app.services.events import get_broker
 router = APIRouter()
 
 _WS_PING_SECONDS = 20.0
+
+# Naaalala ng cookie kung sino ang bisita, para sa pagbalik niya sa radio.
+#
+# Ito rin ang tanging humahawak sa cooldown. Kung walang cookie, ang bawat
+# pag-scan ay bagong `Player` at bagong sariwang cooldown, kaya wala nang saysay
+# ang paghihintay. Hindi ito hadlang sa taong sadyang magbubura ng cookie —
+# pero party ito at hindi casino, at ang alternatibong per-IP na cooldown ay
+# mali: sa likod ng tunnel o ng isang Wi-Fi, isang IP lang ang lahat ng bisita,
+# kaya ang isang tao ay makakabara sa buong party.
+RADIO_COOKIE = "bb_radio"
+_RADIO_COOKIE_MAX_AGE = 60 * 60 * 12
 
 # Ang mga ito ay problema sa dulong Spotify, hindi sa panuntunan natin. Ibang
 # HTTP status para malaman ng host kung sino ang dapat aksyunan.
@@ -142,6 +157,28 @@ def _redirect_warnings(request: Request, settings: Settings) -> list[str]:
     ]
 
 
+async def _drop_from_queue(db: AsyncSession, playing_uri: str | None) -> None:
+    """Alisin sa queue ang mga kantang nalampasan na ng playback."""
+    played = await radio.reconcile_played(db, playing_uri=playing_uri)
+    if not played:
+        return
+    await db.commit()
+    await get_broker().publish(radio.RADIO_TOPIC, {"event": "songs_played", "ids": played})
+
+
+async def _advance_queue(db: AsyncSession, current: spotify.NowPlaying) -> None:
+    """Isabay ang paglilinis ng queue sa now-playing poll.
+
+    Dito ito nakakabit dahil nasa poll na ang kailangang datos — walang dagdag na
+    tawag sa Spotify. Ang `claim_reconcile` ang pumipigil sa pag-query kada poll:
+    iisa lang ang sagot hanggang magpalit ng kanta, at sa isang party ay
+    dose-dosenang poll iyon kada minuto mula sa host console at sa bawat phone.
+    """
+    playing_uri = current.track.uri if current.track else None
+    if radio.claim_reconcile(playing_uri):
+        await _drop_from_queue(db, playing_uri)
+
+
 def _spotify_http_error(exc: spotify.SpotifyError) -> HTTPException:
     upstream = exc.reason in _UPSTREAM_REASONS or isinstance(exc, spotify.SpotifyAuthError)
     return HTTPException(
@@ -176,11 +213,19 @@ async def radio_console(
     store = radio.get_connection_store()
     state = store.status(settings)
 
+    # Isang QR para sa lahat, at hindi isa kada bisita. Ang pairing QR ay
+    # single-use dahil may cards na ipinapamigay at dapat pantay iyon; ang radio
+    # ay wala namang ipinapamigay, kaya i-tape lang ito sa pinto.
+    join_url = _radio_join_url(resolve_base_url(request, settings))
+    qr = segno.make(join_url, error="m") if state.connected else None
+
     return templates.TemplateResponse(
         request,
         "operator_radio.html",
         {
             "csrf_token": session.csrf_token,
+            "join_url": join_url,
+            "join_qr": qr.svg_data_uri(scale=6, dark="#101828", light="#ffffff") if qr else "",
             "configured": state.configured,
             "connected": state.connected,
             "accepting": state.accepting,
@@ -188,7 +233,7 @@ async def radio_console(
             "redirect_uri": settings.spotify_redirect_uri,
             "cooldown_seconds": settings.radio_request_cooldown_seconds,
             "max_track_minutes": settings.radio_max_track_seconds // 60,
-            "requests": await radio.recent_requests(db),
+            "requests": await radio.pending_requests(db),
             "error": error,
             "warnings": _redirect_warnings(request, settings) if state.configured else [],
         },
@@ -319,19 +364,23 @@ async def radio_status(db: Annotated[AsyncSession, Depends(get_db)]) -> dict[str
         "account_name": state.account_name,
         "now_playing": None,
         "problem": "",
-        "requests": await radio.recent_requests(db),
+        "requests": [],
     }
     if not state.connected:
+        payload["requests"] = await radio.pending_requests(db)
         return payload
 
     try:
         current = await radio.get_now_playing_cache().get(store, settings)
         payload["now_playing"] = radio.now_playing_payload(current)
+        await _advance_queue(db, current)
     except (spotify.SpotifyError, radio.RadioError) as exc:
         # Huwag ipatumba ang buong console dahil lang sarado ang Spotify app ng
         # host. Ipakita ang dahilan at ipagpatuloy.
         payload["problem"] = str(exc)
         payload["connected"] = store.connected
+
+    payload["requests"] = await radio.pending_requests(db)
     return payload
 
 
@@ -351,11 +400,23 @@ async def set_accepting(payload: AcceptingBody) -> dict[str, bool]:
 
 
 @router.post("/api/radio/skip", dependencies=[Depends(require_operator)])
-async def skip_track() -> dict[str, bool]:
+async def skip_track(db: Annotated[AsyncSession, Depends(get_db)]) -> dict[str, bool]:
     settings = _radio_settings(for_guest=False)
     store = radio.get_connection_store()
     try:
         token = await store.access_token(settings)
+
+        # Alisin ang ni-skip habang alam pa natin kung ano iyon. Pagkatapos ng
+        # skip, ang susunod na tutugtog ay puwedeng kanta ng host mismo — walang
+        # matutugma doon, at maiiwan sa listahan ang ni-skip nang habambuhay.
+        #
+        # Sinasadyang hindi dumaan sa `claim_reconcile` na bantay: kung nakita na
+        # ng isang poll ang kantang ito, `played` na iyon at walang mababago ang
+        # tawag na ito. Ang pinoprotektahan dito ay ang kabilang kaso, kung saan
+        # ni-skip agad ang kanta bago pa may nakatingin sa kahit anong page.
+        current = await radio.get_now_playing_cache().get(store, settings)
+        await _drop_from_queue(db, current.track.uri if current.track else None)
+
         await spotify.skip_next(access_token=token)
     except radio.RadioError as exc:
         raise _radio_http_error(exc) from exc
@@ -373,6 +434,121 @@ async def disconnect(db: Annotated[AsyncSession, Depends(get_db)]) -> dict[str, 
     await db.commit()
     await get_broker().publish(radio.RADIO_TOPIC, {"event": "radio_closed"})
     return {"connected": False}
+
+
+# --------------------------------------------------------------------------
+# Bisita: pagsali sa radio
+# --------------------------------------------------------------------------
+
+
+def _radio_join_url(base_url: str) -> str:
+    return f"{base_url.rstrip('/')}/radio"
+
+
+def _set_guest_cookie(response: Response, request: Request, play_token: str) -> None:
+    response.set_cookie(
+        RADIO_COOKIE,
+        play_token,
+        max_age=_RADIO_COOKIE_MAX_AGE,
+        httponly=True,
+        # `lax` at hindi `strict`: ang QR ay binubuksan ng camera app, kaya ang
+        # unang navigation ay hindi galing sa page natin. Sa `strict`, ang
+        # pagbalik ng bisita sa naka-bookmark na link ay hindi magpapadala ng
+        # cookie at magiging bagong tao siya kada beses.
+        samesite="lax",
+        secure=is_secure_request(request),
+        path="/",
+    )
+
+
+@router.get("/radio", response_class=HTMLResponse, include_in_schema=False)
+async def radio_join_page(
+    request: Request,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    error: str | None = None,
+) -> Response:
+    """Ang page na bumubukas kapag in-scan ang radio QR.
+
+    Hindi tulad ng pairing QR, ang isang ito ay muling nagagamit at hindi
+    nag-e-expire: isang QR na naka-tape sa pinto, at kahit sino ay puwedeng
+    sumali. Wala namang ipinapamigay dito na kailangang pantay-pantay — ang
+    bingo cards ay may sariling single-use QR pa rin.
+    """
+    known = await radio.guest_by_token(db, request.cookies.get(RADIO_COOKIE))
+    if known is not None:
+        # Nakasali na siya. Diretso na sa sarili niyang radio page.
+        return RedirectResponse(f"/radio/{known.play_token}", status_code=status.HTTP_303_SEE_OTHER)
+
+    if not radio.get_connection_store().connected:
+        return templates.TemplateResponse(
+            request,
+            "radio_join.html",
+            {"live": False, "error": None},
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        )
+
+    return templates.TemplateResponse(
+        request,
+        "radio_join.html",
+        {"live": True, "error": error},
+    )
+
+
+@router.post("/radio/join", response_class=HTMLResponse, include_in_schema=False)
+async def radio_join(
+    request: Request,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    given_name: Annotated[str, Form(min_length=1, max_length=64)],
+) -> Response:
+    settings = get_settings()
+    # Bukas ito sa kahit sino na may QR, at gumagawa ito ng row sa database.
+    # Dito ang panangga.
+    enforce_rate_limit(
+        request,
+        bucket="radio_join",
+        limit=settings.radio_join_rate_limit_per_minute,
+    )
+
+    if not radio.get_connection_store().connected:
+        # Fail closed. Walang saysay gumawa ng Player kung patay ang radio.
+        return templates.TemplateResponse(
+            request,
+            "radio_join.html",
+            {"live": False, "error": None},
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        )
+
+    known = await radio.guest_by_token(db, request.cookies.get(RADIO_COOKIE))
+    if known is not None:
+        response: Response = RedirectResponse(
+            f"/radio/{known.play_token}", status_code=status.HTTP_303_SEE_OTHER
+        )
+        _set_guest_cookie(response, request, known.play_token)
+        return response
+
+    nickname = given_name.strip()
+    if not nickname:
+        return templates.TemplateResponse(
+            request,
+            "radio_join.html",
+            {"live": True, "error": "Please enter a nickname."},
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+        )
+
+    player = await radio.create_guest(db, nickname=nickname)
+    await audit.record(
+        db,
+        event="radio.join",
+        outcome=audit.OUTCOME_OK,
+        player_id=player.id,
+    )
+    await db.commit()
+
+    response = RedirectResponse(
+        f"/radio/{player.play_token}", status_code=status.HTTP_303_SEE_OTHER
+    )
+    _set_guest_cookie(response, request, player.play_token)
+    return response
 
 
 # --------------------------------------------------------------------------
@@ -402,7 +578,7 @@ async def radio_page(
             "accepting": store.accepting,
             "cooldown_seconds": settings.radio_request_cooldown_seconds,
             "max_track_minutes": settings.radio_max_track_seconds // 60,
-            "requests": await radio.recent_requests(db, limit=15),
+            "requests": await radio.pending_requests(db, limit=15),
         },
     )
 
@@ -551,7 +727,7 @@ async def guest_now_playing(
     store = radio.get_connection_store()
 
     if not settings.radio_configured() or not store.connected:
-        return {"live": False, "accepting": False, "now_playing": None}
+        return {"live": False, "accepting": False, "now_playing": None, "requests": []}
 
     result: dict[str, Any] = {"live": True, "accepting": store.accepting, "now_playing": None}
     with contextlib.suppress(spotify.SpotifyError, radio.RadioError):
@@ -559,6 +735,15 @@ async def guest_now_playing(
         # dapat ipakita sa bisita tungkol sa setup ng server.
         current = await radio.get_now_playing_cache().get(store, settings)
         result["now_playing"] = radio.now_playing_payload(current)
+        # Ang phone ng bisita ay nagpo-poll din, kaya lumilinis ang queue kahit
+        # sarado ang host console. Isang beses lang naman kada kanta ang
+        # aktuwal na trabaho.
+        await _advance_queue(db, current)
+
+    # Isinasama ang queue sa parehong sagot. Ang WS ang nagbibigay ng agarang
+    # pagbabago, pero kapag may nalaktawan — nawalan ng signal ang phone,
+    # halimbawa — ito ang nagpapalinis nang hindi kailangang mag-reload.
+    result["requests"] = await radio.pending_requests(db, limit=15)
     return result
 
 

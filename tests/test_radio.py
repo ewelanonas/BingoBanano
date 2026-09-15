@@ -86,6 +86,21 @@ def connect_store() -> None:
     )
 
 
+def stub_now_playing(monkeypatch: pytest.MonkeyPatch, track: spotify.Track | None) -> None:
+    """Itakda ang tumutugtog sa Spotify, at burahin ang cache para makita agad."""
+
+    async def fake(*, access_token: str) -> spotify.NowPlaying:
+        return spotify.NowPlaying(
+            is_playing=track is not None,
+            track=track,
+            progress_ms=1_000,
+            device_name="Party Speaker",
+        )
+
+    monkeypatch.setattr(spotify, "now_playing", fake)
+    radio.get_now_playing_cache().invalidate()
+
+
 def stub_spotify(
     monkeypatch: pytest.MonkeyPatch,
     *,
@@ -562,6 +577,442 @@ async def test_guest_page_hides_search_when_radio_is_off(
     page = await configured.get(f"/radio/{token}")
     assert page.status_code == 200
     assert "The radio is off right now" in page.text
+
+
+# --------------------------------------------------------------------------
+# Ang generic na radio QR
+# --------------------------------------------------------------------------
+
+
+async def test_join_page_is_closed_when_radio_is_off(configured: AsyncClient) -> None:
+    """Fail closed: walang Player na nagagawa kapag patay ang radio."""
+    page = await configured.get("/radio")
+    assert page.status_code == 503
+    assert "The radio is off right now" in page.text
+
+    joined = await configured.post("/radio/join", data={"given_name": "Ana"})
+    assert joined.status_code == 503
+
+    async with get_session_factory()() as db:
+        assert await db.scalar(select(Player.id)) is None
+
+
+async def test_guest_joins_the_radio_without_a_bingo_card(
+    configured: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Ang buong punto ng generic QR: walang bingo, tugtog lang."""
+    connect_store()
+    queued = stub_spotify(monkeypatch)
+
+    landing = await configured.get("/radio")
+    assert landing.status_code == 200
+    assert "Start picking songs" in landing.text
+
+    joined = await configured.post("/radio/join", data={"given_name": "Ana"})
+    assert joined.status_code == 303
+    token = joined.headers["location"].removeprefix("/radio/")
+    assert token
+
+    # Ang bisitang ito ay walang card, kaya patay ang bingo board niya. Iyon ang
+    # tama, at hindi ito dapat pumigil sa radio.
+    assert (await configured.get(f"/play/{token}")).status_code == 404
+
+    radio_page = await configured.get(f"/radio/{token}")
+    assert radio_page.status_code == 200
+    assert "Search for a song" in radio_page.text
+
+    picked = await configured.post(f"/api/radio/{token}/request", json={"track_uri": TRACK.uri})
+    assert picked.status_code == 200, picked.text
+    assert queued == [TRACK.uri]
+
+
+async def test_join_qr_is_reusable(configured: AsyncClient) -> None:
+    """Hindi single-use ang QR na ito, kaya maraming bisita ang puwedeng sumali.
+
+    Kailangang malinis ang cookie sa pagitan, dahil isang phone ang
+    kinakatawan ng isang cookie jar.
+    """
+    connect_store()
+    tokens = set()
+    for name in ["Ana", "Ben", "Cely"]:
+        joined = await configured.post("/radio/join", data={"given_name": name})
+        assert joined.status_code == 303
+        tokens.add(joined.headers["location"].removeprefix("/radio/"))
+        configured.cookies.clear()
+
+    assert len(tokens) == 3
+
+
+async def test_returning_guest_keeps_the_same_identity(configured: AsyncClient) -> None:
+    """Ang cookie ang humahawak sa cooldown.
+
+    Kung bagong `Player` kada scan, ang cooldown ay walang saysay: sapat na ang
+    muling pag-scan para makakuha ng bagong turn.
+    """
+    connect_store()
+    first = await configured.post("/radio/join", data={"given_name": "Ana"})
+    token = first.headers["location"].removeprefix("/radio/")
+
+    # Muling pag-scan ng QR sa parehong phone.
+    again = await configured.get("/radio")
+    assert again.status_code == 303
+    assert again.headers["location"] == f"/radio/{token}"
+
+    # At ang pag-submit muli ng form ay hindi gumagawa ng pangalawang tao.
+    resubmit = await configured.post("/radio/join", data={"given_name": "Ana Impostor"})
+    assert resubmit.status_code == 303
+    assert resubmit.headers["location"] == f"/radio/{token}"
+
+    async with get_session_factory()() as db:
+        players = (await db.execute(select(Player))).scalars().all()
+        assert len(players) == 1
+        assert players[0].given_name == "Ana"
+
+
+async def test_cooldown_survives_a_rescan(
+    configured: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    connect_store()
+    queued = stub_spotify(monkeypatch)
+    joined = await configured.post("/radio/join", data={"given_name": "Ana"})
+    token = joined.headers["location"].removeprefix("/radio/")
+
+    assert (
+        await configured.post(f"/api/radio/{token}/request", json={"track_uri": TRACK.uri})
+    ).status_code == 200
+
+    # Muling pag-scan, tapos subok muli. Parehong tao pa rin, kaya cooldown pa rin.
+    rescan = await configured.get("/radio")
+    same_token = rescan.headers["location"].removeprefix("/radio/")
+    assert same_token == token
+
+    second = await configured.post(
+        f"/api/radio/{same_token}/request", json={"track_uri": OTHER_TRACK.uri}
+    )
+    assert second.status_code == 409
+    assert queued == [TRACK.uri]
+
+
+async def test_join_cookie_is_httponly(configured: AsyncClient) -> None:
+    """Walang JavaScript na kailangang humawak sa capability token."""
+    connect_store()
+    joined = await configured.post("/radio/join", data={"given_name": "Ana"})
+    cookie_header = joined.headers["set-cookie"]
+    assert "bb_radio=" in cookie_header
+    assert "HttpOnly" in cookie_header
+    # `lax` at hindi `strict`: ang QR ay binubuksan ng camera app ng phone.
+    assert "SameSite=lax" in cookie_header
+
+
+async def test_join_is_rate_limited(
+    configured: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Ang endpoint na gumagawa ng row at bukas sa kahit sino ay may hangganan."""
+    monkeypatch.setenv("BINGO_RADIO_JOIN_RATE_LIMIT_PER_MINUTE", "3")
+    get_settings.cache_clear()
+    connect_store()
+
+    codes = []
+    for index in range(5):
+        response = await configured.post("/radio/join", data={"given_name": f"Guest{index}"})
+        codes.append(response.status_code)
+        configured.cookies.clear()
+
+    assert codes[:3] == [303, 303, 303]
+    assert codes[3:] == [429, 429]
+
+
+async def test_host_console_shows_the_join_qr(configured: AsyncClient) -> None:
+    from tests.conftest import TEST_API_KEY
+
+    await configured.post("/operator/session", data={"api_key": TEST_API_KEY})
+    connect_store()
+
+    page = await configured.get("/operator/radio")
+    assert page.status_code == 200
+    assert "data:image/svg+xml" in page.text
+
+    # Ang QR ay dumadaan sa parehong base-URL resolution gaya ng pairing QR:
+    # galing sa address na binuksan ng host, hindi sa `.env`. Ganito, ang
+    # tunnel URL ay hindi kailangang isulat kahit saan.
+    assert "http://testserver/radio" in page.text
+
+    tunneled = await configured.get(
+        "/operator/radio", headers={"Host": "disk-propose-financial.ngrok-free.dev"}
+    )
+    assert "http://disk-propose-financial.ngrok-free.dev/radio" in tunneled.text
+
+
+# --------------------------------------------------------------------------
+# Paglilinis ng queue: ang natapos na ay umaalis sa listahan
+# --------------------------------------------------------------------------
+
+
+async def _statuses() -> list[str]:
+    """Ang status ng bawat request, sa pagkakasunod ng pag-request."""
+    async with get_session_factory()() as db:
+        rows = (
+            await db.scalars(select(SongRequest.status).order_by(SongRequest.requested_at))
+        ).all()
+    return list(rows)
+
+
+async def test_playing_song_leaves_the_queue(
+    configured: AsyncClient, operator_headers: dict[str, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Ang bug: lumalaki lang ang listahan buong gabi.
+
+    Pagkatapos tumugtog, wala na dapat sa "Coming up" — may sariling now-playing
+    panel na iyon, at ang dalawang beses lumitaw ang parehong kanta ang mismong
+    ikinalilito.
+    """
+    connect_store()
+    stub_spotify(monkeypatch)
+    token = await _play_token(configured, operator_headers)
+
+    assert (
+        await configured.post(f"/api/radio/{token}/request", json={"track_uri": TRACK.uri})
+    ).status_code == 200
+
+    page = await configured.get(f"/radio/{token}")
+    assert TRACK.name in page.text
+
+    # Umabot na ng playback ang kanta.
+    stub_now_playing(monkeypatch, TRACK)
+    poll = await configured.get(f"/api/radio/{token}/now-playing")
+    assert poll.status_code == 200
+    assert poll.json()["requests"] == []
+
+    async with get_session_factory()() as db:
+        record = await db.scalar(select(SongRequest))
+        assert record is not None
+        # Naka-mark, hindi dinelete: kailangan pa rin ito ng duplicate check.
+        assert record.status == "played"
+
+    cleared = await configured.get(f"/radio/{token}")
+    assert TRACK.name not in cleared.text
+    assert "Nothing waiting" in cleared.text
+
+
+async def test_songs_before_the_playing_one_are_cleared_too(
+    configured: AsyncClient, operator_headers: dict[str, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Nagsasarili ang paglilinis kapag walang bukas na page nang matagal.
+
+    Kung ang tumutugtog ay ang pangatlo, ang una at pangalawa ay tapos na —
+    kahit walang nakakita nang tumugtog ang mga iyon.
+    """
+    third = spotify.Track(
+        uri="spotify:track:2takcwOaAZWiXQijPHIx7B",
+        name="Tadhana",
+        artist="Up Dharma Down",
+        duration_ms=250_000,
+        art_url="",
+    )
+    connect_store()
+
+    async def fake_fetch(*, access_token: str, track_uri: str) -> spotify.Track:
+        return {TRACK.uri: TRACK, OTHER_TRACK.uri: OTHER_TRACK, third.uri: third}[track_uri]
+
+    async def fake_queue(*, access_token: str, track_uri: str) -> None:
+        return None
+
+    monkeypatch.setattr(spotify, "fetch_track", fake_fetch)
+    monkeypatch.setattr(spotify, "add_to_queue", fake_queue)
+    monkeypatch.setenv("BINGO_RADIO_REQUEST_COOLDOWN_SECONDS", "0")
+    get_settings.cache_clear()
+
+    token = await _play_token(configured, operator_headers)
+    for uri in [TRACK.uri, OTHER_TRACK.uri, third.uri]:
+        assert (
+            await configured.post(f"/api/radio/{token}/request", json={"track_uri": uri})
+        ).status_code == 200
+
+    assert len((await configured.get(f"/api/radio/{token}/now-playing")).json()["requests"]) == 3
+
+    # Nasa pangatlo na ang playback.
+    stub_now_playing(monkeypatch, third)
+    assert (await configured.get(f"/api/radio/{token}/now-playing")).json()["requests"] == []
+
+    assert await _statuses() == ["played", "played", "played"]
+
+
+async def test_host_own_track_leaves_the_queue_alone(
+    configured: AsyncClient, operator_headers: dict[str, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Ang kanta ng host mismo ay hindi nagbabasehan ng anumang paglilinis.
+
+    Hindi natin alam kung nasaan sa queue ng Spotify ang mga hiniling kapag ang
+    tumutugtog ay galing sa playlist niya, kaya walang ginagalaw.
+    """
+    connect_store()
+    stub_spotify(monkeypatch)
+    token = await _play_token(configured, operator_headers)
+    await configured.post(f"/api/radio/{token}/request", json={"track_uri": TRACK.uri})
+
+    host_track = spotify.Track(
+        uri="spotify:track:0V3wPSX9ygBnCm8psDIegu",
+        name="Something From The Host Playlist",
+        artist="Nobody",
+        duration_ms=200_000,
+        art_url="",
+    )
+    stub_now_playing(monkeypatch, host_track)
+
+    poll = await configured.get(f"/api/radio/{token}/now-playing")
+    assert len(poll.json()["requests"]) == 1
+    assert await _statuses() == ["queued"]
+
+
+async def test_nothing_playing_leaves_the_queue_alone(
+    configured: AsyncClient, operator_headers: dict[str, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    connect_store()
+    stub_spotify(monkeypatch)
+    token = await _play_token(configured, operator_headers)
+    await configured.post(f"/api/radio/{token}/request", json={"track_uri": TRACK.uri})
+
+    stub_now_playing(monkeypatch, None)
+    poll = await configured.get(f"/api/radio/{token}/now-playing")
+    assert len(poll.json()["requests"]) == 1
+
+
+async def test_skip_removes_the_current_song_even_if_nobody_polled(
+    configured: AsyncClient, operator_headers: dict[str, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Ang kaso na mababaon kung hindi hahawakan ang skip nang tahasan.
+
+    Kapag ni-skip agad bago pa may nakatingin sa kahit anong page, ang susunod
+    na tutugtog ay puwedeng kanta ng host — walang matutugma doon, at maiiwan
+    sa listahan ang ni-skip nang habambuhay.
+    """
+    skipped: list[bool] = []
+
+    async def fake_skip(*, access_token: str) -> None:
+        skipped.append(True)
+
+    connect_store()
+    stub_spotify(monkeypatch)
+    monkeypatch.setattr(spotify, "skip_next", fake_skip)
+    token = await _play_token(configured, operator_headers)
+    await configured.post(f"/api/radio/{token}/request", json={"track_uri": TRACK.uri})
+
+    # Tumutugtog na ito, pero walang page na nag-poll — `queued` pa rin.
+    stub_now_playing(monkeypatch, TRACK)
+    assert await _statuses() == ["queued"]
+
+    response = await configured.post("/api/radio/skip", headers=operator_headers)
+    assert response.status_code == 200
+    assert skipped == [True]
+    assert await _statuses() == ["played"]
+
+
+async def test_played_song_still_blocks_a_duplicate(
+    configured: AsyncClient, operator_headers: dict[str, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Ang katapos-tapos lang na kanta ay hindi puwedeng i-request muli.
+
+    Kung `queued` lang ang titingnan ng duplicate check, mababali ang buong
+    punto ng window pagkatapos ng unang pagtugtog.
+    """
+    connect_store()
+    stub_spotify(monkeypatch)
+    ana = await _play_token(configured, operator_headers, "Ana")
+    ben = await _play_token(configured, operator_headers, "Ben")
+
+    await configured.post(f"/api/radio/{ana}/request", json={"track_uri": TRACK.uri})
+    stub_now_playing(monkeypatch, TRACK)
+    await configured.get(f"/api/radio/{ana}/now-playing")
+
+    again = await configured.post(f"/api/radio/{ben}/request", json={"track_uri": TRACK.uri})
+    assert again.status_code == 409
+    assert "just played" in again.json()["detail"]
+
+
+async def test_cooldown_is_not_reset_when_the_song_starts_playing(
+    configured: AsyncClient, operator_headers: dict[str, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Ang pagtugtog ng kanta ay hindi bagong turn para sa nagpadala."""
+    connect_store()
+    stub_spotify(monkeypatch)
+    token = await _play_token(configured, operator_headers)
+    await configured.post(f"/api/radio/{token}/request", json={"track_uri": TRACK.uri})
+
+    stub_now_playing(monkeypatch, TRACK)
+    await configured.get(f"/api/radio/{token}/now-playing")
+    assert await _statuses() == ["played"]
+
+    second = await configured.post(
+        f"/api/radio/{token}/request", json={"track_uri": OTHER_TRACK.uri}
+    )
+    assert second.status_code == 409
+    assert "everyone gets a turn" in second.json()["detail"]
+
+
+async def test_queue_is_in_play_order(
+    configured: AsyncClient, operator_headers: dict[str, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Queue ito at hindi history: ang nasa itaas ang susunod na tutugtog."""
+    connect_store()
+
+    async def fake_fetch(*, access_token: str, track_uri: str) -> spotify.Track:
+        return TRACK if track_uri == TRACK.uri else OTHER_TRACK
+
+    async def fake_queue(*, access_token: str, track_uri: str) -> None:
+        return None
+
+    monkeypatch.setattr(spotify, "fetch_track", fake_fetch)
+    monkeypatch.setattr(spotify, "add_to_queue", fake_queue)
+    monkeypatch.setenv("BINGO_RADIO_REQUEST_COOLDOWN_SECONDS", "0")
+    get_settings.cache_clear()
+
+    token = await _play_token(configured, operator_headers)
+    await configured.post(f"/api/radio/{token}/request", json={"track_uri": TRACK.uri})
+    await configured.post(f"/api/radio/{token}/request", json={"track_uri": OTHER_TRACK.uri})
+
+    names = [
+        item["track_name"]
+        for item in (await configured.get(f"/api/radio/{token}/now-playing")).json()["requests"]
+    ]
+    assert names == [TRACK.name, OTHER_TRACK.name]
+
+
+async def test_repeat_polls_do_not_requery(
+    configured: AsyncClient, operator_headers: dict[str, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Ang bantay laban sa pag-query kada poll kada bisita.
+
+    Sa isang party, dose-dosenang poll kada minuto ang darating. Iisa lang naman
+    ang kasagutan hanggang magpalit ng kanta.
+    """
+    connect_store()
+    stub_spotify(monkeypatch)
+    token = await _play_token(configured, operator_headers)
+    await configured.post(f"/api/radio/{token}/request", json={"track_uri": TRACK.uri})
+
+    stub_now_playing(monkeypatch, TRACK)
+    assert radio.claim_reconcile(TRACK.uri) is True
+    assert radio.claim_reconcile(TRACK.uri) is False
+    assert radio.claim_reconcile(OTHER_TRACK.uri) is True
+
+
+async def test_played_rows_are_never_deleted(
+    configured: AsyncClient, operator_headers: dict[str, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Append-only pa rin ang table. Ang `played` ay display state lang."""
+    connect_store()
+    stub_spotify(monkeypatch)
+    token = await _play_token(configured, operator_headers)
+    await configured.post(f"/api/radio/{token}/request", json={"track_uri": TRACK.uri})
+
+    stub_now_playing(monkeypatch, TRACK)
+    await configured.get(f"/api/radio/{token}/now-playing")
+
+    async with get_session_factory()() as db:
+        rows = (await db.execute(select(SongRequest))).scalars().all()
+        assert len(rows) == 1
+        assert rows[0].track_name == TRACK.name
+        assert rows[0].status == "played"
 
 
 async def test_disconnect_clears_the_connection(

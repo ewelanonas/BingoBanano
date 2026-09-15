@@ -542,6 +542,7 @@ Everything lives in `.env`, prefixed with `BINGO_`.
 | `BINGO_SPOTIFY_CLIENT_ID` | none | Banano Radio. Blank turns the radio off |
 | `BINGO_SPOTIFY_CLIENT_SECRET` | none | Banano Radio. Blank turns the radio off |
 | `BINGO_SPOTIFY_REDIRECT_URI` | `http://127.0.0.1:8000/operator/radio/callback` | Must match the Spotify dashboard exactly |
+| `BINGO_RADIO_JOIN_RATE_LIMIT_PER_MINUTE` | `10` | Limit on joining the radio |
 | `BINGO_RADIO_REQUEST_COOLDOWN_SECONDS` | `120` | Wait between picks, per guest |
 | `BINGO_RADIO_MAX_TRACK_SECONDS` | `600` | Longest track a guest may pick |
 | `BINGO_RADIO_DUPLICATE_WINDOW_MINUTES` | `60` | How long a picked song blocks a repeat |
@@ -602,10 +603,50 @@ authenticated users per app: we use one.
 2. Sign in as host, open **Radio** in the lobby header, press **Connect Spotify**,
    and approve. This step must be done from a browser on the machine running the
    server, because the callback is a loopback address.
-3. Guests now see a **Banano Radio** link at the top of their card page.
+3. A **song QR** appears on the Radio page. Show it on screen or print it and tape
+   it near the speaker.
 
 From the Radio page you can see what is playing, skip a track, watch every pick
 come in, and **Close requests** when the party is winding down.
+
+### The queue clears itself
+
+**Coming up** lists only songs still waiting, oldest first, so the top of the list
+is what plays next. A song drops off once it starts playing or gets skipped.
+
+Nothing is deleted. The row is marked as played, which keeps the hour-long block
+on repeating a song working and leaves the record intact. It just stops appearing
+in the queue, because the song that is playing already has its own panel above and
+seeing it twice is the confusing part.
+
+The clearing rides along with the now-playing poll, so it costs no extra Spotify
+calls, and it clears everything up to the current song rather than one at a time.
+That last part matters: if every page was closed for a while, one glance catches
+the list back up instead of leaving five stale songs behind.
+
+### How guests get in
+
+Two doors, and neither needs a Spotify account, an app, or a login.
+
+**The song QR.** One QR for everybody, on the Radio page. A guest scans it with
+the normal camera app, types a nickname, and lands on a search box. This works for
+people who are not playing bingo at all.
+
+Unlike the bingo QR this one is **reusable and does not expire**. That difference
+is deliberate: a bingo QR hands out cards, so it has to be one per person and
+single-use or the game stops being fair. The radio hands out nothing, so a single
+code taped to a wall is the whole point.
+
+**From their card page.** Guests already playing bingo have a **Banano Radio**
+link in the header of their card page. The link only appears once Spotify is
+connected, so nobody taps through to a dead page.
+
+Either way the guest ends up on `/radio/{token}`, an unguessable capability URL,
+the same idea as the bingo board. A cookie remembers them, so scanning the QR
+again returns them to their own list instead of making them a new person. That
+cookie is also what holds the cooldown together: without it, a rescan would hand
+out a fresh turn and the wait would mean nothing. Someone who clears cookies gets
+another turn. This is a house party, not a casino.
 
 ### Using a tunnel URL instead
 
@@ -647,7 +688,9 @@ page says so before you press Connect. Left unchecked, Spotify answers with
 - One pick per guest every 120 seconds, so nobody becomes the sole DJ
 - Nothing longer than 10 minutes
 - A song cannot be requested again for 60 minutes
-- Rate limits on search and on requests, by IP
+- Rate limits on joining, on search, and on requests, by IP
+- Joining is refused entirely while Spotify is not connected, so a stray scan
+  cannot fill the database with guests who have nothing to do
 - Requests that Spotify refuses are recorded too, so a silent speaker has a
   visible reason on the Radio page
 
@@ -672,7 +715,7 @@ app/
   services/    # pairing, rounds, issuance, audit, events, radio, spotify
   api/         # HTTP and WebSocket routes
   web/         # Jinja2 templates and CSS
-tests/         # 206 tests
+tests/         # 224 tests
 scripts/       # setup-dev.ps1, start-tunnel.ps1
 ```
 
@@ -755,9 +798,40 @@ be a suggestion rather than a limit.
 account. That is what makes the radio work inside Spotify's five-user Development
 Mode allowance, and it means a guest's phone never handles a credential.
 
+**The radio QR is reusable where the bingo QR is single-use.** A bingo QR hands
+out cards, so one per person and one use only is what keeps the game fair. The
+radio hands out nothing, so the opposite is correct: one code, taped to a wall,
+good all night.
+
+**A radio guest is an ordinary player row with no cards.** Rather than a second
+kind of identity, joining the radio creates the same `Player` the bingo flow
+creates. Requests show a name the same way, and a cardless player is harmless:
+their bingo board answers 404 and history is listed by card, so they never appear
+where they do not belong.
+
 **Refused song requests are still recorded.** A silent speaker with an empty
 Radio page tells the host nothing. With the failure written down, the reason —
 usually no active device — is on screen.
+
+**A played song is marked, not deleted.** The song_request table stays append-only,
+the same as draws and claims. Marking it keeps the repeat block honest and keeps
+the record, while taking the song out of the queue view. Deleting would have been
+less code and would have quietly broken the hour-long duplicate window the moment
+a song finished.
+
+**The queue clears up to the current song, not one at a time.** Clearing rides on
+the now-playing poll, so if nobody has a page open the clearing does not happen.
+Sweeping everything up to whatever is playing means a single glance catches up on
+however many songs went by, instead of leaving a trail of stale ones.
+
+**A track playing that nobody requested clears nothing.** When the host's own
+playlist is playing, there is no way to tell where in Spotify's queue the guest
+requests sit, so the list is left alone rather than guessed at.
+
+**Skipping is handled explicitly instead of being left to the poll.** After a skip
+the next track may be one of the host's own, which matches nothing and would leave
+the skipped song in the list forever. So the skip clears it first, while it is
+still known what was playing.
 
 **Whether the radio is on is not something a guest can see the reason for.** The
 guest page says the radio is off and nothing else. Missing credentials and a host
@@ -766,7 +840,7 @@ who has not connected look identical from the outside.
 ## Development
 
 ```powershell
-.\.venv\Scripts\python.exe -m pytest -q          # 206 tests
+.\.venv\Scripts\python.exe -m pytest -q          # 224 tests
 .\.venv\Scripts\python.exe -m ruff check .
 .\.venv\Scripts\python.exe -m ruff format .
 .\.venv\Scripts\python.exe -m mypy               # strict on app/domain

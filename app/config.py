@@ -72,6 +72,10 @@ class Settings(BaseSettings):
     spotify_redirect_uri: str = "http://127.0.0.1:8000/operator/radio/callback"
     # Maluwag: normal na mag-type-type ang bisita habang naghahanap ng kanta.
     radio_search_rate_limit_per_minute: int = Field(default=30, ge=1, le=600)
+    # Ang radio join ay gumagawa ng Player row at bukas sa kahit sino na may QR.
+    # Masikip sadya: isang beses lang naman sumasali ang bisita, at kapag
+    # naka-tunnel ang server ay abot ito ng internet.
+    radio_join_rate_limit_per_minute: int = Field(default=10, ge=1, le=120)
     radio_request_rate_limit_per_minute: int = Field(default=10, ge=1, le=120)
     # Ang totoong panangga sa "ako lang ang DJ" ay ito, hindi ang rate limit.
     # Dalawang minuto kada bisita: kasya pa rin ang lahat sa isang party.

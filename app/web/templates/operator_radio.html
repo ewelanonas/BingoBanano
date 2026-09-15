@@ -93,29 +93,49 @@
     <button type="button" id="disconnect" class="btn ghost">Disconnect Spotify</button>
   </div>
   <p class="hint">
-    Guests reach the radio from their own card page, so the link is already in
-    their hands. Each guest waits {{ cooldown_seconds }}s between picks, and
-    tracks longer than {{ max_track_minutes }} minutes are refused.
+    Each guest waits {{ cooldown_seconds }}s between picks, and tracks longer
+    than {{ max_track_minutes }} minutes are refused.
   </p>
   {% endif %}
 </section>
 
+{% if connected %}
 <section class="panel">
-  <h2 class="section-title">Requests</h2>
+  <h2 class="section-title">The song QR</h2>
+  <p class="muted">
+    One QR for everybody. Show it on screen or print it and tape it near the
+    speaker. Guests scan it with the normal camera app, enter a nickname, and
+    start picking. No Spotify account, no app, no bingo card needed.
+  </p>
+  <div class="qr-wrap">
+    <img src="{{ join_qr }}" alt="QR code that opens Banano Radio" width="260" height="260">
+    <p class="hint"><code class="setup-code">{{ join_url }}</code></p>
+  </div>
+  <p class="hint">
+    Unlike the bingo QR, this one does not expire and is not single-use. Guests
+    who are already playing bingo also have a Banano Radio link at the top of
+    their card page.
+  </p>
+</section>
+{% endif %}
+
+<section class="panel">
+  <h2 class="section-title">Coming up</h2>
   <ul class="radio-feed" id="feed">
     {% for item in requests %}
-    <li class="radio-feed-row {{ 'failed' if item.status == 'failed' else '' }}">
+    <li class="radio-feed-row" data-request-id="{{ item.id }}">
       <span class="radio-feed-track">{{ item.track_name }}</span>
       <span class="radio-feed-artist muted">{{ item.artist_name }}</span>
       <span class="radio-feed-who">{{ item.requested_by }}</span>
-      {% if item.status == 'failed' %}
-      <span class="radio-feed-state">did not go through</span>
-      {% endif %}
     </li>
     {% endfor %}
   </ul>
   <p class="hint" id="feed-empty" {% if requests %}hidden{% endif %}>
-    Nothing yet. Picks show up here the moment a guest sends one.
+    Nothing waiting. Picks show up here the moment a guest sends one.
+  </p>
+  <p class="hint">
+    Songs drop off this list once they start playing or get skipped, so what you
+    see is only what is still to come.
   </p>
 </section>
 {% endblock %}
@@ -138,31 +158,46 @@
     return { ok: response.ok, data };
   }
 
-  function addFeedRow(payload, { prepend }) {
+  function buildRow(payload) {
     const row = document.createElement("li");
     row.className = "radio-feed-row";
-    if (payload.status === "failed") { row.classList.add("failed"); }
-
-    const track = document.createElement("span");
-    track.className = "radio-feed-track";
-    track.textContent = payload.track_name;
-    const artist = document.createElement("span");
-    artist.className = "radio-feed-artist muted";
-    artist.textContent = payload.artist_name;
-    const who = document.createElement("span");
-    who.className = "radio-feed-who";
-    who.textContent = payload.requested_by;
-    row.append(track, artist, who);
-
-    if (payload.status === "failed") {
-      const state = document.createElement("span");
-      state.className = "radio-feed-state";
-      state.textContent = "did not go through";
-      row.append(state);
+    row.dataset.requestId = payload.id;
+    for (const [cls, text] of [
+      ["radio-feed-track", payload.track_name],
+      ["radio-feed-artist muted", payload.artist_name],
+      ["radio-feed-who", payload.requested_by],
+    ]) {
+      const span = document.createElement("span");
+      span.className = cls;
+      span.textContent = text;
+      row.append(span);
     }
+    return row;
+  }
 
-    if (prepend) { feedEl.prepend(row); } else { feedEl.append(row); }
+  function addFeedRow(payload) {
+    // Ang bumagsak ay hindi kailanman nasa queue. Ang mensahe ng problema ang
+    // nagsasabi niyon, at may nakuha nang error ang nagpadala.
+    if (payload.status !== "queued") { return; }
+    if (feedEl.querySelector(`li[data-request-id="${payload.id}"]`)) { return; }
+    // Append, hindi prepend: queue ito at ang nasa itaas ang susunod tutugtog.
+    feedEl.append(buildRow(payload));
     feedEmptyEl.hidden = true;
+  }
+
+  function dropFeedRows(ids) {
+    for (const id of ids) {
+      const row = feedEl.querySelector(`li[data-request-id="${id}"]`);
+      if (row) { row.remove(); }
+    }
+    feedEmptyEl.hidden = feedEl.children.length > 0;
+  }
+
+  function renderFeed(requests) {
+    // Ang server ang may katotohanan. Ang WS ay para sa agarang pakiramdam; ang
+    // buong palit na ito ang naglilinis kapag may hindi naabutan.
+    feedEl.replaceChildren(...requests.map(buildRow));
+    feedEmptyEl.hidden = requests.length > 0;
   }
 
   if (CONNECTED) {
@@ -196,6 +231,7 @@
 
       toggleEl.setAttribute("aria-pressed", String(data.accepting));
       toggleEl.textContent = data.accepting ? "Close requests" : "Open requests";
+      renderFeed(data.requests || []);
     }
 
     document.getElementById("skip").addEventListener("click", async () => {
@@ -228,7 +264,11 @@
   const socket = new WebSocket(`${scheme}//${location.host}/api/radio/host-events`);
   socket.addEventListener("message", (event) => {
     const payload = JSON.parse(event.data);
-    if (payload.event === "song_requested") { addFeedRow(payload, { prepend: true }); }
+    if (payload.event === "song_requested") {
+      addFeedRow(payload);
+    } else if (payload.event === "songs_played") {
+      dropFeedRows(payload.ids);
+    }
   });
 </script>
 {% endblock %}

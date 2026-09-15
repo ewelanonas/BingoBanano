@@ -24,13 +24,21 @@ import asyncio
 import secrets
 import time
 from dataclasses import dataclass, replace
-from datetime import timedelta
+from datetime import datetime, timedelta
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings
-from app.db.models import SONG_FAILED, SONG_QUEUED, Player, SongRequest
+from app.db.models import (
+    SONG_COUNTED,
+    SONG_FAILED,
+    SONG_PLAYED,
+    SONG_QUEUED,
+    Player,
+    SongRequest,
+)
+from app.domain.rng import new_play_token
 from app.services import spotify
 from app.services.identity import utcnow
 
@@ -229,6 +237,21 @@ _connections = ConnectionStore()
 _states = StateStore()
 _now_playing = NowPlayingCache()
 
+# Ang huling track na na-reconcile na. Sa isang party, ang host console at ang
+# bawat phone ay nagpo-poll ng now-playing, kaya kung walang bantay na ito ay
+# isang database query kada poll kada bisita. Iisa lang naman ang kasagutan
+# hanggang magpalit ng kanta.
+_reconciled_uri: str | None = None
+
+
+def claim_reconcile(playing_uri: str | None) -> bool:
+    """`True` kapag bago ang tumutugtog at kailangang tingnan ang listahan."""
+    global _reconciled_uri
+    if playing_uri == _reconciled_uri:
+        return False
+    _reconciled_uri = playing_uri
+    return True
+
 
 def get_connection_store() -> ConnectionStore:
     return _connections
@@ -244,9 +267,38 @@ def get_now_playing_cache() -> NowPlayingCache:
 
 def reset() -> None:
     """Ibalik sa blangko. Para sa tests, at para sa `disconnect` ng host."""
+    global _reconciled_uri
     _connections.disconnect()
     _connections.set_accepting(True)
     _now_playing.invalidate()
+    _reconciled_uri = None
+
+
+async def create_guest(db: AsyncSession, *, nickname: str) -> Player:
+    """Bisitang pumasok sa radio QR at walang bingo card.
+
+    Parehong `Player` row gaya ng bumunot ng cards, at hindi bagong table.
+    Palayaw lang ang naitatala, kagaya ng dati, at ang `play_token` ang siyang
+    capability URL niya papunta sa radio.
+
+    Isang `Player` na walang card ay ligtas: ang `/play/{token}` ay 404 kapag
+    walang cards, at ang history ay nakalista ayon sa card, kaya hindi lumilitaw
+    ang taong ito sa mga bingo page.
+    """
+    player = Player(
+        given_name=nickname[:64],
+        play_token=new_play_token(),
+        created_at=utcnow(),
+    )
+    db.add(player)
+    await db.flush()
+    return player
+
+
+async def guest_by_token(db: AsyncSession, token: str | None) -> Player | None:
+    if not token:
+        return None
+    return await db.scalar(select(Player).where(Player.play_token == token))
 
 
 async def guard_request(
@@ -281,28 +333,36 @@ async def guard_request(
 
     if settings.radio_duplicate_window_minutes:
         window_start = now - timedelta(minutes=settings.radio_duplicate_window_minutes)
+        # Kasama ang `played` dito. Kung `queued` lang ang titingnan, ang kantang
+        # katapos-tapos lang ay puwede nang i-request muli, at ang paulit-ulit na
+        # kanta ang eksaktong pinipigilan ng window na ito.
         already = await db.scalar(
-            select(SongRequest.id)
+            select(SongRequest.status)
             .where(
                 SongRequest.track_uri == track.uri,
-                SongRequest.status == SONG_QUEUED,
+                SongRequest.status.in_(SONG_COUNTED),
                 SongRequest.requested_at >= window_start,
             )
+            .order_by(SongRequest.requested_at.desc())
             .limit(1)
         )
         if already is not None:
             raise RadioError(
-                f"{track.name} is already in the queue.",
+                f"{track.name} just played."
+                if already == SONG_PLAYED
+                else f"{track.name} is already in the queue.",
                 reason="duplicate",
             )
 
     if settings.radio_request_cooldown_seconds:
         cooldown_start = now - timedelta(seconds=settings.radio_request_cooldown_seconds)
+        # `SONG_COUNTED` at hindi `SONG_QUEUED`: kapag nagsimula nang tumugtog ang
+        # kanta ng bisita, hindi dapat mag-reset ang cooldown niya.
         recent = await db.scalar(
             select(SongRequest.requested_at)
             .where(
                 SongRequest.player_id == player.id,
-                SongRequest.status == SONG_QUEUED,
+                SongRequest.status.in_(SONG_COUNTED),
                 SongRequest.requested_at >= cooldown_start,
             )
             .order_by(SongRequest.requested_at.desc())
@@ -344,17 +404,86 @@ async def record_request(
     return record
 
 
-async def recent_requests(db: AsyncSession, *, limit: int = 30) -> list[dict[str, object]]:
-    """Ang feed na ipinapakita sa host at sa mga bisita."""
+async def pending_requests(db: AsyncSession, *, limit: int = 30) -> list[dict[str, object]]:
+    """Ang mga kantang naghihintay pa. Naunang hiniling, naunang tutugtog.
+
+    Pataas ang pagkakasunod dahil queue ito at hindi history: ang nasa itaas ay
+    ang susunod na tutugtog. Ang natapos na at ang bumagsak ay wala na dito.
+    """
     rows = (
         await db.execute(
             select(SongRequest, Player.given_name)
             .join(Player, Player.id == SongRequest.player_id)
-            .order_by(SongRequest.requested_at.desc())
+            .where(SongRequest.status == SONG_QUEUED)
+            .order_by(SongRequest.requested_at)
             .limit(limit)
         )
     ).all()
     return [request_payload(record, requested_by=name) for record, name in rows]
+
+
+async def mark_played(db: AsyncSession, *, up_to: datetime) -> list[str]:
+    """Tanggalin sa queue ang lahat ng hiniling hanggang sa `up_to`.
+
+    Ibinabalik ang mga id na naapektuhan, para maalis din ito sa mga bukas na
+    page nang hindi kailangang mag-reload.
+    """
+    ids = list(
+        (
+            await db.scalars(
+                select(SongRequest.id).where(
+                    SongRequest.status == SONG_QUEUED,
+                    SongRequest.requested_at <= up_to,
+                )
+            )
+        ).all()
+    )
+    if not ids:
+        return []
+
+    await db.execute(
+        update(SongRequest)
+        .where(SongRequest.id.in_(ids))
+        .values(status=SONG_PLAYED)
+        .execution_options(synchronize_session=False)
+    )
+    return ids
+
+
+async def reconcile_played(db: AsyncSession, *, playing_uri: str | None) -> list[str]:
+    """Ihanay ang listahan natin sa aktuwal na tumutugtog sa Spotify.
+
+    Kapag ang tumutugtog ngayon ay isang hiniling na kanta, ang lahat ng hiniling
+    bago pa nito ay tapos na — nalampasan na ng playback. Ang tumutugtog mismo ay
+    tinatanggal din: may sariling now-playing panel na iyon, at dalawang beses
+    lumitaw ang parehong kanta ang mismong ikinalilito.
+
+    Ang paglahat hanggang sa tumutugtog ay siya ring pumupuno ng butas: kapag
+    walang bukas na page, walang nagre-reconcile, at kapag bumukas muli ay
+    naiwan na ang lima o anim na kanta. Isang pagtingin ang naglilinis ng lahat.
+
+    Walang commit dito. Ang tumatawag ang nagsasara ng transaction, kagaya ng
+    ibang service sa repo.
+    """
+    if not playing_uri:
+        return []
+
+    playing = await db.scalar(
+        select(SongRequest.requested_at)
+        .where(
+            SongRequest.track_uri == playing_uri,
+            SongRequest.status == SONG_QUEUED,
+        )
+        # Ang pinakamaaga ang siyang tumutugtog kung nadoble ang kanta sa queue.
+        .order_by(SongRequest.requested_at)
+        .limit(1)
+    )
+    if playing is None:
+        # Kanta ng host mismo, o galing sa playlist niya. Walang gagalawin —
+        # hindi natin alam kung nasaan sa queue ang mga hiniling.
+        return []
+
+    return await mark_played(db, up_to=playing)
 
 
 def request_payload(record: SongRequest, *, requested_by: str) -> dict[str, object]:
@@ -385,6 +514,7 @@ def now_playing_payload(state: spotify.NowPlaying) -> dict[str, object]:
 __all__ = [
     "RADIO_TOPIC",
     "SONG_FAILED",
+    "SONG_PLAYED",
     "SONG_QUEUED",
     "ConnectionStore",
     "NowPlayingCache",
@@ -392,12 +522,17 @@ __all__ = [
     "RadioNotConnected",
     "RadioStatus",
     "StateStore",
+    "claim_reconcile",
+    "create_guest",
     "get_connection_store",
     "get_now_playing_cache",
     "get_state_store",
     "guard_request",
+    "guest_by_token",
+    "mark_played",
     "now_playing_payload",
-    "recent_requests",
+    "pending_requests",
+    "reconcile_played",
     "record_request",
     "request_payload",
     "reset",
