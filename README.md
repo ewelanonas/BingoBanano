@@ -687,7 +687,9 @@ page says so before you press Connect. Left unchecked, Spotify answers with
 
 - One pick per guest every 120 seconds, so nobody becomes the sole DJ
 - Nothing longer than 10 minutes
-- A song cannot be requested again for 60 minutes
+- A song can only be in the queue once, and cannot be picked again for 60 minutes
+  after it plays. Matching is on title and artist, not on the Spotify track id,
+  because the same song has a separate id for every release it appears on
 - Rate limits on joining, on search, and on requests, by IP
 - Joining is refused entirely while Spotify is not connected, so a stray scan
   cannot fill the database with guests who have nothing to do
@@ -710,12 +712,12 @@ affected.
 
 ```
 app/
-  domain/      # pure logic: cards, patterns, draws, RNG. No I/O.
+  domain/      # pure logic: cards, patterns, draws, RNG, song matching. No I/O.
   db/          # SQLAlchemy models and session
   services/    # pairing, rounds, issuance, audit, events, radio, spotify
   api/         # HTTP and WebSocket routes
   web/         # Jinja2 templates and CSS
-tests/         # 224 tests
+tests/         # 240 tests
 scripts/       # setup-dev.ps1, start-tunnel.ps1
 ```
 
@@ -813,6 +815,35 @@ where they do not belong.
 Radio page tells the host nothing. With the failure written down, the reason —
 usually no active device — is on screen.
 
+**Repeats are matched on title and artist, not on the Spotify track id.** The same
+song has a separate id for every release it appears on: single, album, deluxe
+edition, remaster, greatest hits. In a search those sit next to each other and look
+identical, so comparing ids let a guest add the same song again by tapping a
+different line. Titles are normalised first, which drops release noise like
+`- Remastered 2011` and `(Live)` and folds accents and punctuation. It errs toward
+strict: refusing the live version of a song that just played is better than playing
+the same song twice at one party.
+
+**One copy in the queue is a database constraint, not a Python check.** A partial
+unique index covers `track_uri` where the status is queued. The Python check runs
+first for the friendly message, but it is check-then-act: two requests arriving
+together both see no row before either inserts. The index is what actually holds,
+which is why a double tap and two phones picking at once are safe. Same reasoning
+as the two unique constraints on the draw table.
+
+**The row is written before the call to Spotify, not after.** If the database
+refuses the second copy, nothing reached Spotify. The other order cannot be undone:
+a song already in Spotify's queue stays there.
+
+**A request Spotify refused leaves the queued state.** It has to. The unique index
+covers queued rows, so a song that never played would otherwise hold that slot
+forever and could never be requested again.
+
+**Missing indexes are a schema drift failure, same as missing columns.** `create_all`
+adds neither to a table that already exists. A missing column eventually errors on
+insert, but a missing unique index never errors at all: the guard is silently gone
+and duplicates just start getting through. So the startup check compares indexes too.
+
 **A played song is marked, not deleted.** The song_request table stays append-only,
 the same as draws and claims. Marking it keeps the repeat block honest and keeps
 the record, while taking the song out of the queue view. Deleting would have been
@@ -840,7 +871,7 @@ who has not connected look identical from the outside.
 ## Development
 
 ```powershell
-.\.venv\Scripts\python.exe -m pytest -q          # 224 tests
+.\.venv\Scripts\python.exe -m pytest -q          # 240 tests
 .\.venv\Scripts\python.exe -m ruff check .
 .\.venv\Scripts\python.exe -m ruff format .
 .\.venv\Scripts\python.exe -m mypy               # strict on app/domain

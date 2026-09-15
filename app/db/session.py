@@ -59,9 +59,14 @@ def _assert_schema_current(connection: Connection) -> None:
     """Ihambing ang aktuwal na schema sa mga model.
 
     Ang `create_all()` ay gumagawa ng kulang na table pero HINDI nagdadagdag ng
-    column sa table na existing na. Kaya kapag may bagong field na naidagdag at
-    luma pa ang database file, tahimik itong dumadaan at bumabagsak lang sa
-    unang INSERT — malayo na sa tunay na dahilan. Dito natin hinuhuli iyon.
+    column o index sa table na existing na. Kaya kapag may bagong field na
+    naidagdag at luma pa ang database file, tahimik itong dumadaan at bumabagsak
+    lang sa unang INSERT — malayo na sa tunay na dahilan. Dito natin hinuhuli iyon.
+
+    Ang index ay tinitingnan din, at hindi lang ang column. Mas delikado pa nga
+    ang kulang na index: kung ang isang unique index ang tanging pumipigil sa
+    isang double-insert, ang pagkawala nito ay hindi nagbibigay ng error kahit
+    kailan — tahimik lang na nawawala ang panangga.
     """
     inspector = inspect(connection)
     problems: list[str] = []
@@ -70,10 +75,17 @@ def _assert_schema_current(connection: Connection) -> None:
         if not inspector.has_table(table.name):  # pragma: no cover - ginawa na ni create_all
             problems.append(f"{table.name}: buong table ay wala")
             continue
-        actual = {column["name"] for column in inspector.get_columns(table.name)}
-        missing = sorted({column.name for column in table.columns} - actual)
-        if missing:
-            problems.append(f"{table.name}: {', '.join(missing)}")
+
+        actual_columns = {column["name"] for column in inspector.get_columns(table.name)}
+        missing_columns = sorted({column.name for column in table.columns} - actual_columns)
+        if missing_columns:
+            problems.append(f"{table.name}: columns {', '.join(missing_columns)}")
+
+        actual_indexes = {index["name"] for index in inspector.get_indexes(table.name)}
+        expected_indexes = {index.name for index in table.indexes if index.name}
+        missing_indexes = sorted(expected_indexes - actual_indexes)
+        if missing_indexes:
+            problems.append(f"{table.name}: indexes {', '.join(missing_indexes)}")
 
     if not problems:
         return
@@ -81,7 +93,7 @@ def _assert_schema_current(connection: Connection) -> None:
     path = _database_file(get_settings().database_url) or "your database"
     raise SchemaOutdatedError(
         "The database was created by an older version of BingoBanano and is "
-        "missing columns:\n  "
+        "out of date:\n  "
         + "\n  ".join(problems)
         + "\n\nRounds are disposable, so the fix is to delete the file and let it "
         f"be recreated:\n  Remove-Item -Force {path}\n"
