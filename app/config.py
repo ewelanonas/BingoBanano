@@ -16,6 +16,15 @@ class MissingSecretError(RuntimeError):
     """Kulang ang required secret sa configuration."""
 
 
+class RadioNotConfiguredError(RuntimeError):
+    """Walang Spotify credentials, kaya patay ang Banano Radio.
+
+    Hiwalay ito sa `MissingSecretError` nang sadya. Ang bingo ay tumatakbo nang
+    walang Spotify — kung isasama natin ito sa `require_secrets()`, ang bawat
+    party na walang Spotify ay hindi na makakapagsimula ng app.
+    """
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -50,6 +59,43 @@ class Settings(BaseSettings):
     # simulan ng isang request. Dalawang file lang naman ang ina-upload, kaya
     # sapat na ang 12 kada minuto para sa pagpapalit-palit ng crop.
     photo_upload_rate_limit_per_minute: int = Field(default=12, ge=1, le=120)
+
+    # --- Banano Radio (Spotify) ---
+    # Galing sa developer.spotify.com dashboard ng host. Walang default: kapag
+    # blangko, patay lang ang Radio at tumatakbo pa rin ang bingo.
+    spotify_client_id: str = ""
+    spotify_client_secret: str = ""
+    # KAILANGANG loopback address. Bawal na ang `localhost` sa Spotify, at bawal
+    # ang plain HTTP maliban sa loopback — kaya `127.0.0.1` talaga ang nakasulat
+    # dito at hindi ang tunnel URL. Ang host lang naman ang pumipindot ng
+    # Connect, at nasa makina niya ang browser na iyon.
+    spotify_redirect_uri: str = "http://127.0.0.1:8000/operator/radio/callback"
+    # Maluwag: normal na mag-type-type ang bisita habang naghahanap ng kanta.
+    radio_search_rate_limit_per_minute: int = Field(default=30, ge=1, le=600)
+    radio_request_rate_limit_per_minute: int = Field(default=10, ge=1, le=120)
+    # Ang totoong panangga sa "ako lang ang DJ" ay ito, hindi ang rate limit.
+    # Dalawang minuto kada bisita: kasya pa rin ang lahat sa isang party.
+    radio_request_cooldown_seconds: int = Field(default=120, ge=0, le=3600)
+    # Walang 20-minutong ambient track sa kaarawan.
+    radio_max_track_seconds: int = Field(default=600, ge=30, le=3600)
+    # Kung kalalabas lang ng kantang ito, hindi na puwedeng i-request muli.
+    radio_duplicate_window_minutes: int = Field(default=60, ge=0, le=720)
+    # Isang upstream call kada ganitong dami ng segundo, gaano man karaming
+    # bisita ang nakatingin sa now-playing. Dito namamatay ang rate limit ng
+    # Spotify kapag 20 phone ang nag-poll nang sabay.
+    radio_now_playing_cache_seconds: int = Field(default=5, ge=1, le=60)
+
+    def radio_configured(self) -> bool:
+        return bool(self.spotify_client_id and self.spotify_client_secret)
+
+    def require_radio(self) -> None:
+        if not self.radio_configured():
+            raise RadioNotConfiguredError(
+                "BINGO_SPOTIFY_CLIENT_ID and BINGO_SPOTIFY_CLIENT_SECRET are not set, "
+                "so Banano Radio is off. Create an app at developer.spotify.com, add "
+                f"{self.spotify_redirect_uri} as a Redirect URI, then put the two "
+                "values in .env."
+            )
 
     def require_secrets(self) -> None:
         if len(self.operator_api_key) < 32:

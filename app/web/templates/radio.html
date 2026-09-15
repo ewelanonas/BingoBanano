@@ -1,0 +1,228 @@
+{% extends "base.html" %}
+{% block title %}Banano Radio{% endblock %}
+
+{% block header_extra %}
+<span class="header-actions">
+  <a class="btn ghost" href="/play/{{ token }}">My cards</a>
+</span>
+{% endblock %}
+
+{% block content %}
+<section class="panel">
+  <h1>Banano Radio</h1>
+
+  {% if not live %}
+  <p class="alert" role="status">
+    The radio is off right now. Ask the host to switch it on, then reload this
+    page.
+  </p>
+  {% else %}
+  <p class="muted">
+    Pick a song, {{ player_name }}. It goes into the party queue and plays after
+    whatever is on now.
+  </p>
+
+  <div class="radio-now" id="now-playing" hidden>
+    <img class="radio-art" id="np-art" alt="" width="64" height="64" hidden>
+    <div class="radio-now-text">
+      <p class="hint">Playing now</p>
+      <p class="radio-track" id="np-track">--</p>
+      <p class="radio-artist muted" id="np-artist"></p>
+    </div>
+  </div>
+
+  <div class="field">
+    <label for="q">Search for a song</label>
+    <input id="q" type="search" inputmode="search" autocomplete="off"
+           maxlength="120" placeholder="Song or artist">
+  </div>
+  <p class="hint">
+    One pick every {{ cooldown_seconds }} seconds, so everyone gets a turn.
+    Nothing longer than {{ max_track_minutes }} minutes.
+  </p>
+  <p id="message" class="status" role="status" aria-live="polite"></p>
+
+  <ul class="radio-results" id="results"></ul>
+  {% endif %}
+</section>
+
+<section class="panel">
+  <h2 class="section-title">Party queue</h2>
+  <ul class="radio-feed" id="feed">
+    {% for item in requests %}
+    {% if item.status != 'failed' %}
+    <li class="radio-feed-row">
+      <span class="radio-feed-track">{{ item.track_name }}</span>
+      <span class="radio-feed-artist muted">{{ item.artist_name }}</span>
+      <span class="radio-feed-who">{{ item.requested_by }}</span>
+    </li>
+    {% endif %}
+    {% endfor %}
+  </ul>
+  <p class="hint" id="feed-empty" {% if requests %}hidden{% endif %}>
+    Nobody has picked anything yet. Go first.
+  </p>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  const TOKEN = {{ token | tojson }};
+  const LIVE = {{ live | tojson }};
+
+  const feedEl = document.getElementById("feed");
+  const feedEmptyEl = document.getElementById("feed-empty");
+
+  function addFeedRow(payload) {
+    // Ang bumagsak na request ay hindi ipinapakita sa mga bisita. Ang nagpadala
+    // ay may sariling mensahe na; ang iba ay walang mapapala sa pagkakita ng
+    // kantang hindi pumasok.
+    if (payload.status === "failed") { return; }
+    const row = document.createElement("li");
+    row.className = "radio-feed-row";
+    for (const [cls, text] of [
+      ["radio-feed-track", payload.track_name],
+      ["radio-feed-artist muted", payload.artist_name],
+      ["radio-feed-who", payload.requested_by],
+    ]) {
+      const span = document.createElement("span");
+      span.className = cls;
+      span.textContent = text;
+      row.append(span);
+    }
+    feedEl.prepend(row);
+    feedEmptyEl.hidden = true;
+  }
+
+  if (LIVE) {
+    const queryEl = document.getElementById("q");
+    const resultsEl = document.getElementById("results");
+    const messageEl = document.getElementById("message");
+    const nowEl = document.getElementById("now-playing");
+    const artEl = document.getElementById("np-art");
+    const trackEl = document.getElementById("np-track");
+    const artistEl = document.getElementById("np-artist");
+
+    function formatLength(ms) {
+      const total = Math.round(ms / 1000);
+      return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, "0")}`;
+    }
+
+    function render(tracks) {
+      resultsEl.replaceChildren();
+      for (const track of tracks) {
+        const row = document.createElement("li");
+        row.className = "radio-result";
+
+        // Ang buong row ang tap target. Sa phone, ang maliit na button ay
+        // nagiging maling pindot.
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "radio-pick";
+        button.dataset.uri = track.uri;
+
+        if (track.art_url) {
+          const art = document.createElement("img");
+          art.className = "radio-art";
+          art.src = track.art_url;
+          art.width = 48;
+          art.height = 48;
+          art.alt = "";
+          button.append(art);
+        }
+
+        const text = document.createElement("span");
+        text.className = "radio-result-text";
+        const name = document.createElement("span");
+        name.className = "radio-track";
+        name.textContent = track.name;
+        const meta = document.createElement("span");
+        meta.className = "radio-artist muted";
+        meta.textContent = `${track.artist} · ${formatLength(track.duration_ms)}`;
+        text.append(name, meta);
+        button.append(text);
+
+        row.append(button);
+        resultsEl.append(row);
+      }
+    }
+
+    async function search(query) {
+      const response = await fetch(
+        `/api/radio/${TOKEN}/search?q=${encodeURIComponent(query)}`
+      );
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
+        messageEl.textContent = data.detail || "Search is not working right now.";
+        return;
+      }
+      messageEl.textContent = "";
+      render(await response.json());
+    }
+
+    // Debounce: bawat keystroke ay isang request papuntang Spotify kung hindi.
+    let timer = null;
+    queryEl.addEventListener("input", () => {
+      const query = queryEl.value.trim();
+      clearTimeout(timer);
+      if (query.length < 2) { resultsEl.replaceChildren(); return; }
+      timer = setTimeout(() => search(query), 350);
+    });
+
+    resultsEl.addEventListener("click", async (event) => {
+      const button = event.target.closest("button.radio-pick");
+      if (!button) { return; }
+
+      // Isahan lang ang bilang ng pindot. Kung hindi, dalawang beses papasok ang
+      // parehong kanta sa isang mabagal na koneksyon.
+      for (const other of resultsEl.querySelectorAll("button.radio-pick")) {
+        other.disabled = true;
+      }
+      messageEl.textContent = "Sending...";
+
+      const response = await fetch(`/api/radio/${TOKEN}/request`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ track_uri: button.dataset.uri }),
+      });
+      const data = await response.json().catch(() => ({}));
+      messageEl.textContent = data.message || data.detail || "Could not send that.";
+
+      if (response.ok) {
+        resultsEl.replaceChildren();
+        queryEl.value = "";
+      } else {
+        for (const other of resultsEl.querySelectorAll("button.radio-pick")) {
+          other.disabled = false;
+        }
+      }
+    });
+
+    async function refreshNowPlaying() {
+      const response = await fetch(`/api/radio/${TOKEN}/now-playing`);
+      if (!response.ok) { return; }
+      const data = await response.json();
+      const np = data.now_playing;
+      nowEl.hidden = !np || !np.track_name;
+      if (np && np.track_name) {
+        trackEl.textContent = np.track_name;
+        artistEl.textContent = np.artist_name;
+        artEl.hidden = !np.art_url;
+        if (np.art_url) { artEl.src = np.art_url; }
+      }
+    }
+
+    refreshNowPlaying();
+    // Naka-cache ang sagot sa server, kaya hindi ito nagiging dagdag na trapiko
+    // papuntang Spotify kahit dalawampung phone ang nag-poll.
+    setInterval(refreshNowPlaying, 6000);
+  }
+
+  const scheme = location.protocol === "https:" ? "wss:" : "ws:";
+  const socket = new WebSocket(`${scheme}//${location.host}/api/radio/${TOKEN}/events`);
+  socket.addEventListener("message", (event) => {
+    const payload = JSON.parse(event.data);
+    if (payload.event === "song_requested") { addFeedRow(payload); }
+  });
+</script>
+{% endblock %}

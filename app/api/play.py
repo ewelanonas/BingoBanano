@@ -41,7 +41,7 @@ from app.db.session import get_db
 from app.domain.cards import GRID_SIZE
 from app.domain.draws import TOTAL_BALLS
 from app.domain.patterns import pattern_cell_groups
-from app.services import elimination, rounds
+from app.services import elimination, radio, rounds
 from app.services.events import get_broker
 
 router = APIRouter()
@@ -111,6 +111,9 @@ async def play_board(
 
     game = await _round_of(db, cards)
     welcome = request.query_params.get("welcome") == "1"
+    # Ang link sa Banano Radio ay lumalabas lang kapag may aktuwal na naka-kabit
+    # na Spotify. Ang patay na link sa phone ng bisita ay mukhang sirang app.
+    radio_live = radio.get_connection_store().connected
 
     if game.game_type == GAME_ELIMINATION:
         drawn = set(await rounds.drawn_balls(db, game.id))
@@ -132,6 +135,7 @@ async def play_board(
                 "left": elimination.numbers_left(card, drawn),
                 "is_out": card.eliminated_at is not None,
                 "is_winner": card.is_winner,
+                "radio_live": radio_live,
             },
         )
 
@@ -148,6 +152,7 @@ async def play_board(
             "total_balls": TOTAL_BALLS,
             # Kapag walang binibilang ang app, malayang makakapindot ang player.
             "free_marking": game.caller_mode == CALLER_OFFLINE,
+            "radio_live": radio_live,
         },
     )
 

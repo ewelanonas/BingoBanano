@@ -35,8 +35,13 @@ async def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> AsyncIterat
 
     from app.api.security import get_limiter
     from app.main import create_app
+    from app.services import radio
 
     get_limiter().reset()
+    # Ang Spotify connection ay nasa module-level na store, kaya kailangang
+    # linisin. Kung hindi, ang naka-connect na radio ng isang test ay tatawid
+    # sa susunod.
+    radio.reset()
 
     app = create_app()
     transport = ASGITransport(app=app)

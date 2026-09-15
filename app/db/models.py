@@ -60,6 +60,12 @@ GAME_CLASSIC = "classic"
 GAME_ELIMINATION = "elimination"
 GAME_TYPES = (GAME_CLASSIC, GAME_ELIMINATION)
 
+# Banano Radio: ano ang nangyari sa hiniling na kanta.
+#   queued  - tinanggap ng Spotify, nasa playback queue na
+#   failed  - tinanggihan ng Spotify; nasa `failure_reason` ang dahilan
+SONG_QUEUED = "queued"
+SONG_FAILED = "failed"
+
 
 def _new_id() -> str:
     return uuid.uuid4().hex
@@ -249,6 +255,33 @@ class BingoCard(Base):
         UniqueConstraint("session_id", "serial", name="uq_card_session_serial"),
         Index("ix_card_round_eliminated", "round_id", "eliminated_at"),
     )
+
+
+class SongRequest(Base):
+    """Isang hiniling na kanta sa Banano Radio. Append-only.
+
+    Ini-record kahit tinanggihan ng Spotify. Kapag walang bumukas na kanta at
+    walang naitalang dahilan, ang host ay walang matitingnan kung bakit.
+
+    Walang naka-store na Spotify token dito. Ang track URI ay pampubliko na
+    catalog identifier at hindi credential.
+    """
+
+    __tablename__ = "song_request"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=_new_id)
+    player_id: Mapped[str] = mapped_column(String(32), ForeignKey("player.id"), index=True)
+    track_uri: Mapped[str] = mapped_column(String(64), index=True)
+    track_name: Mapped[str] = mapped_column(String(200))
+    artist_name: Mapped[str] = mapped_column(String(200))
+    duration_ms: Mapped[int] = mapped_column(Integer)
+    requested_at: Mapped[datetime] = mapped_column(UtcDateTime(), index=True)
+    status: Mapped[str] = mapped_column(String(16), default=SONG_QUEUED)
+    failure_reason: Mapped[str] = mapped_column(String(64), default="")
+
+    player: Mapped[Player] = relationship()
+
+    __table_args__ = (Index("ix_song_request_track_time", "track_uri", "requested_at"),)
 
 
 class AuditEvent(Base):

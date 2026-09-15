@@ -1,0 +1,234 @@
+{% extends "base.html" %}
+{% block title %}Banano Radio - BingoBanano{% endblock %}
+
+{% block header_extra %}
+<span class="header-actions">
+  <a class="btn ghost" href="/kiosk">Host lobby</a>
+  <a class="btn ghost" href="/operator/photos">Photos</a>
+  <a class="btn ghost" href="/history">History</a>
+  <form method="post" action="/operator/logout" class="inline">
+    <button type="submit" class="btn ghost">Sign out</button>
+  </form>
+</span>
+{% endblock %}
+
+{% block content %}
+<section class="panel">
+  <h1>Banano Radio</h1>
+  <p class="muted">
+    Hook up your own Spotify once, and guests can pick songs from their phones.
+    Their picks go straight into whatever is playing on your speaker. Guests do
+    not need a Spotify account.
+  </p>
+
+  {% if error == "not_configured" %}
+  <p class="alert" role="status">Spotify is not configured on this server yet.</p>
+  {% endif %}
+
+  {% for warning in warnings %}
+  <p class="alert warnings" role="status">{{ warning }}</p>
+  {% endfor %}
+
+  {% if not configured %}
+  <div class="radio-setup">
+    <h2 class="section-title">One-time setup</h2>
+    <p class="muted">
+      Banano Radio is off because the server has no Spotify app credentials.
+      This part happens once, on this machine.
+    </p>
+    <ol class="setup-steps">
+      <li>
+        Open <strong>developer.spotify.com/dashboard</strong>, sign in with the
+        Spotify account that will play the music, and create an app.
+      </li>
+      <li>
+        Add this exact <strong>Redirect URI</strong> to the app:
+        <code class="setup-code">{{ redirect_uri }}</code>
+        It has to match character for character.
+      </li>
+      <li>
+        Copy the Client ID and Client Secret into your <code>.env</code> as
+        <code>BINGO_SPOTIFY_CLIENT_ID</code> and
+        <code>BINGO_SPOTIFY_CLIENT_SECRET</code>, then restart the server.
+      </li>
+    </ol>
+    <p class="hint">
+      The account needs <strong>Spotify Premium</strong>. Adding to the playback
+      queue is a Premium-only feature, so a free account cannot run the radio.
+    </p>
+  </div>
+
+  {% elif not connected %}
+  <p class="status">Not connected.</p>
+  <p>
+    <a class="btn primary" href="/operator/radio/connect">Connect Spotify</a>
+  </p>
+  <p class="hint">
+    Start Spotify on the speaker first and play anything. Requests land in the
+    queue of the device that is already playing, so without an active device
+    there is nowhere for a song to go.
+  </p>
+
+  {% else %}
+  <p class="status" id="connection-line">
+    Connected as <strong>{{ account_name }}</strong>.
+  </p>
+
+  <div class="radio-now" id="now-playing" hidden>
+    <img class="radio-art" id="np-art" alt="" width="72" height="72" hidden>
+    <div class="radio-now-text">
+      <p class="radio-track" id="np-track">--</p>
+      <p class="radio-artist muted" id="np-artist"></p>
+      <p class="hint" id="np-device"></p>
+    </div>
+  </div>
+  <p class="status" id="np-problem" role="status" aria-live="polite"></p>
+
+  <div class="row controls">
+    <button type="button" id="skip" class="btn ghost">Skip this track</button>
+    <button type="button" id="toggle-accepting" class="btn ghost"
+            aria-pressed="{{ 'true' if accepting else 'false' }}">
+      {% if accepting %}Close requests{% else %}Open requests{% endif %}
+    </button>
+    <button type="button" id="disconnect" class="btn ghost">Disconnect Spotify</button>
+  </div>
+  <p class="hint">
+    Guests reach the radio from their own card page, so the link is already in
+    their hands. Each guest waits {{ cooldown_seconds }}s between picks, and
+    tracks longer than {{ max_track_minutes }} minutes are refused.
+  </p>
+  {% endif %}
+</section>
+
+<section class="panel">
+  <h2 class="section-title">Requests</h2>
+  <ul class="radio-feed" id="feed">
+    {% for item in requests %}
+    <li class="radio-feed-row {{ 'failed' if item.status == 'failed' else '' }}">
+      <span class="radio-feed-track">{{ item.track_name }}</span>
+      <span class="radio-feed-artist muted">{{ item.artist_name }}</span>
+      <span class="radio-feed-who">{{ item.requested_by }}</span>
+      {% if item.status == 'failed' %}
+      <span class="radio-feed-state">did not go through</span>
+      {% endif %}
+    </li>
+    {% endfor %}
+  </ul>
+  <p class="hint" id="feed-empty" {% if requests %}hidden{% endif %}>
+    Nothing yet. Picks show up here the moment a guest sends one.
+  </p>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  const CSRF_TOKEN = {{ csrf_token | tojson }};
+  const CONNECTED = {{ connected | tojson }};
+
+  const feedEl = document.getElementById("feed");
+  const feedEmptyEl = document.getElementById("feed-empty");
+
+  async function post(path, body) {
+    const response = await fetch(path, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-CSRF-Token": CSRF_TOKEN },
+      body: body === undefined ? null : JSON.stringify(body),
+    });
+    const data = await response.json().catch(() => ({}));
+    return { ok: response.ok, data };
+  }
+
+  function addFeedRow(payload, { prepend }) {
+    const row = document.createElement("li");
+    row.className = "radio-feed-row";
+    if (payload.status === "failed") { row.classList.add("failed"); }
+
+    const track = document.createElement("span");
+    track.className = "radio-feed-track";
+    track.textContent = payload.track_name;
+    const artist = document.createElement("span");
+    artist.className = "radio-feed-artist muted";
+    artist.textContent = payload.artist_name;
+    const who = document.createElement("span");
+    who.className = "radio-feed-who";
+    who.textContent = payload.requested_by;
+    row.append(track, artist, who);
+
+    if (payload.status === "failed") {
+      const state = document.createElement("span");
+      state.className = "radio-feed-state";
+      state.textContent = "did not go through";
+      row.append(state);
+    }
+
+    if (prepend) { feedEl.prepend(row); } else { feedEl.append(row); }
+    feedEmptyEl.hidden = true;
+  }
+
+  if (CONNECTED) {
+    const artEl = document.getElementById("np-art");
+    const trackEl = document.getElementById("np-track");
+    const artistEl = document.getElementById("np-artist");
+    const deviceEl = document.getElementById("np-device");
+    const problemEl = document.getElementById("np-problem");
+    const nowEl = document.getElementById("now-playing");
+    const toggleEl = document.getElementById("toggle-accepting");
+
+    async function refresh() {
+      const response = await fetch("/api/radio/status", {
+        headers: { "X-CSRF-Token": CSRF_TOKEN },
+      });
+      if (!response.ok) { return; }
+      const data = await response.json();
+
+      problemEl.textContent = data.problem || "";
+      const np = data.now_playing;
+      nowEl.hidden = !np || !np.track_name;
+      if (np && np.track_name) {
+        trackEl.textContent = np.track_name;
+        artistEl.textContent = np.artist_name;
+        deviceEl.textContent = np.device_name
+          ? `Playing on ${np.device_name}`
+          : "Paused";
+        artEl.hidden = !np.art_url;
+        if (np.art_url) { artEl.src = np.art_url; }
+      }
+
+      toggleEl.setAttribute("aria-pressed", String(data.accepting));
+      toggleEl.textContent = data.accepting ? "Close requests" : "Open requests";
+    }
+
+    document.getElementById("skip").addEventListener("click", async () => {
+      const { ok, data } = await post("/api/radio/skip");
+      if (!ok) { problemEl.textContent = data.detail || "Could not skip."; }
+      // Ang Spotify ay may ilang sandaling pagitan bago mag-usad ang queue.
+      setTimeout(refresh, 700);
+    });
+
+    toggleEl.addEventListener("click", async () => {
+      const next = toggleEl.getAttribute("aria-pressed") !== "true";
+      await post("/api/radio/accepting", { accepting: next });
+      refresh();
+    });
+
+    document.getElementById("disconnect").addEventListener("click", async () => {
+      await post("/api/radio/disconnect");
+      location.reload();
+    });
+
+    refresh();
+    // Ang Spotify ay nagbabago nang hindi natin alam: puwedeng mag-skip ang host
+    // sa sarili niyang app. Kaya poll, hindi push.
+    setInterval(refresh, 5000);
+  }
+
+  const scheme = location.protocol === "https:" ? "wss:" : "ws:";
+  // Hiwalay na path para sa host: wala siyang play_token, at ang cookie niya ang
+  // pinapasa ng browser sa WS handshake.
+  const socket = new WebSocket(`${scheme}//${location.host}/api/radio/host-events`);
+  socket.addEventListener("message", (event) => {
+    const payload = JSON.parse(event.data);
+    if (payload.event === "song_requested") { addFeedRow(payload, { prepend: true }); }
+  });
+</script>
+{% endblock %}

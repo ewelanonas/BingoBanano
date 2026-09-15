@@ -17,13 +17,16 @@ dependencies = [
     # ni Pillow at ini-re-encode bago isulat, kaya kung hindi litrato ay hindi
     # mag-i-save. Tinatanggal din nito ang EXIF, kasama ang GPS.
     "pillow==12.3.0",
+    # Banano Radio: ang tanging outbound HTTP call ng app ay papuntang Spotify
+    # Web API. Async ito, kaya hindi puwede ang `requests` — ha-hawakan nito ang
+    # event loop habang naghihintay ng sagot ng Spotify.
+    "httpx==0.28.1",
 ]
 
 [dependency-groups]
 dev = [
     "pytest==9.1.1",
     "pytest-asyncio==1.4.0",
-    "httpx==0.28.1",
     "ruff==0.16.6",
     "mypy==2.3.1",
 ]

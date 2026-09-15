@@ -1,6 +1,14 @@
 {% extends "base.html" %}
 {% block title %}Your card - {{ round.join_code }}{% endblock %}
 
+{% block header_extra %}
+{% if radio_live %}
+<span class="header-actions">
+  <a class="btn ghost" href="/radio/{{ token }}">Banano Radio</a>
+</span>
+{% endif %}
+{% endblock %}
+
 {% block content %}
 <section class="panel">
   {% if welcome %}

@@ -10,10 +10,11 @@ from fastapi import FastAPI, Request, status
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from app.api import history, operator, pairing, photos, play, rounds
+from app.api import history, operator, pairing, photos, play, radio, rounds
 from app.api.deps import STATIC_DIR
 from app.config import MissingSecretError, get_settings
 from app.db.session import create_schema, dispose_engine
+from app.services.spotify import aclose_client
 
 logger = logging.getLogger("bingobanano")
 
@@ -26,9 +27,14 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     settings.require_secrets()
     await create_schema()
     logger.info("BingoBanano ready. QR base URL: %s", settings.public_base_url)
+    if settings.radio_configured():
+        logger.info("Banano Radio enabled. Spotify redirect: %s", settings.spotify_redirect_uri)
     try:
         yield
     finally:
+        # Ang shared Spotify client ay may bukas na connection pool. Kapag hindi
+        # ito sinara, may naiiwang warning at nakabukas na socket sa tests.
+        await aclose_client()
         await dispose_engine()
 
 
@@ -47,6 +53,7 @@ def create_app() -> FastAPI:
     app.include_router(play.router)
     app.include_router(history.router)
     app.include_router(photos.router)
+    app.include_router(radio.router)
 
     @app.exception_handler(MissingSecretError)
     async def _missing_secret(request: Request, exc: MissingSecretError) -> JSONResponse:
