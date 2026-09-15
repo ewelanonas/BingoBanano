@@ -37,6 +37,7 @@ from fastapi.params import Query
 from fastapi.responses import HTMLResponse, RedirectResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import templates
@@ -49,7 +50,7 @@ from app.api.security import (
     require_operator,
 )
 from app.config import RadioNotConfiguredError, Settings, get_settings
-from app.db.models import SONG_FAILED, SONG_QUEUED, Player
+from app.db.models import SONG_QUEUED, Player
 from app.db.session import get_db
 from app.services import audit, radio, spotify
 from app.services.events import get_broker
@@ -636,6 +637,12 @@ async def request_song(
         limit=settings.radio_request_rate_limit_per_minute,
     )
     player = await _player_by_token(db, token)
+    # Kinukuha agad bilang plain string. Ang `rollback` sa ibaba ay nag-e-expire ng
+    # ORM object, at ang pagbasa ng attribute pagkatapos niyon ay isang tahimik na
+    # database call sa lugar kung saan hindi puwedeng mag-await. `MissingGreenlet`
+    # ang lalabas doon, na wala namang kinalaman sa tunay na dahilan.
+    player_id = player.id
+    player_name = player.given_name
 
     store = radio.get_connection_store()
     try:
@@ -648,7 +655,7 @@ async def request_song(
             db,
             event="radio.request",
             outcome=audit.OUTCOME_DENIED,
-            player_id=player.id,
+            player_id=player_id,
             detail={"reason": exc.reason},
         )
         await db.commit()
@@ -658,43 +665,69 @@ async def request_song(
             db,
             event="radio.request",
             outcome=audit.OUTCOME_ERROR,
-            player_id=player.id,
+            player_id=player_id,
             detail={"reason": exc.reason},
         )
         await db.commit()
         raise _spotify_http_error(exc) from exc
 
+    # Ang row ay isinusulat BAGO ang tawag sa Spotify, at ang unique index ang
+    # tunay na panangga laban sa dobleng pindot. Ang check sa `guard_request` ay
+    # check-then-act: dalawang sabay na request ay pareho munang makikitang wala
+    # pang row bago pa makapag-insert ang alinman.
+    #
+    # Ito rin ang tamang pagkakasunod: kapag ang database ang tumanggi, hindi na
+    # umaabot sa Spotify ang pangalawa. Hindi na mababawi ang kantang nailagay na
+    # sa queue ng Spotify.
+    try:
+        record = await radio.record_request(db, player=player, track=track, status=SONG_QUEUED)
+    except IntegrityError as exc:
+        await db.rollback()
+        await audit.record(
+            db,
+            event="radio.request",
+            outcome=audit.OUTCOME_DENIED,
+            player_id=player_id,
+            detail={"reason": "duplicate_race"},
+        )
+        await db.commit()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"{track.name} is already in the queue.",
+        ) from exc
+
     try:
         await spotify.add_to_queue(access_token=access, track_uri=track.uri)
     except spotify.SpotifyError as exc:
-        # Itala pa rin ang bumagsak. Kung hindi, ang host ay walang matitingnan
-        # kapag tahimik ang speaker at walang pumapasok na kanta.
-        record = await radio.record_request(
-            db, player=player, track=track, status=SONG_FAILED, failure_reason=exc.reason
-        )
+        # Ang row ay nakatala na, kaya pinapalitan ito at hindi dinadagdagan.
+        # Itinatago pa rin ang bumagsak: kung hindi, ang host ay walang
+        # matitingnan kapag tahimik ang speaker at walang pumapasok na kanta.
+        #
+        # Mahalaga ang paglabas nito sa `queued`. Kung maiiwan itong nakapila, ang
+        # kantang hindi kailanman tumugtog ay babara sa unique index nang
+        # habambuhay at walang makakapag-request nito muli.
+        await radio.mark_failed(db, record, reason=exc.reason)
+        payload_out = radio.request_payload(record, requested_by=player_name)
         await audit.record(
             db,
             event="radio.request",
             outcome=audit.OUTCOME_ERROR,
-            player_id=player.id,
+            player_id=player_id,
             detail={"reason": exc.reason},
         )
         await db.commit()
         await get_broker().publish(
             radio.RADIO_TOPIC,
-            {
-                "event": "song_requested",
-                **radio.request_payload(record, requested_by=player.given_name),
-            },
+            {"event": "song_requested", **payload_out},
         )
         raise _spotify_http_error(exc) from exc
 
-    record = await radio.record_request(db, player=player, track=track, status=SONG_QUEUED)
+    queued_payload = radio.request_payload(record, requested_by=player_name)
     await audit.record(
         db,
         event="radio.request",
         outcome=audit.OUTCOME_OK,
-        player_id=player.id,
+        player_id=player_id,
         # Walang pamagat ng kanta dito. Ang audit trail ay para sa "anong
         # nangyari", hindi para sa panlasa sa musika ng bisita.
         detail={"duration_ms": track.duration_ms},
@@ -703,14 +736,11 @@ async def request_song(
 
     await get_broker().publish(
         radio.RADIO_TOPIC,
-        {
-            "event": "song_requested",
-            **radio.request_payload(record, requested_by=player.given_name),
-        },
+        {"event": "song_requested", **queued_payload},
     )
     return RequestSongResponse(
         queued=True,
-        message=f"{track.name} is in the queue. Salamat, {player.given_name}!",
+        message=f"{track.name} is in the queue. Salamat, {player_name}!",
         track_name=track.name,
         artist_name=track.artist,
     )

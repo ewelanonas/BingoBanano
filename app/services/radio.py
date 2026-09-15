@@ -38,6 +38,7 @@ from app.db.models import (
     Player,
     SongRequest,
 )
+from app.domain.music import track_key
 from app.domain.rng import new_play_token
 from app.services import spotify
 from app.services.identity import utcnow
@@ -50,6 +51,11 @@ _REFRESH_MARGIN_SECONDS = 60.0
 _STATE_TTL_SECONDS = 600.0
 
 RADIO_TOPIC = "radio"
+
+# Hangganan sa dami ng row na inihahambing sa duplicate check. Ang isang party ay
+# hindi umaabot dito, at pinipigilan nito ang paglaki ng trabaho kung sakaling
+# maluwag ang window na naka-configure.
+_DUPLICATE_SCAN_LIMIT = 200
 
 
 class RadioError(RuntimeError):
@@ -336,20 +342,34 @@ async def guard_request(
         # Kasama ang `played` dito. Kung `queued` lang ang titingnan, ang kantang
         # katapos-tapos lang ay puwede nang i-request muli, at ang paulit-ulit na
         # kanta ang eksaktong pinipigilan ng window na ito.
-        already = await db.scalar(
-            select(SongRequest.status)
-            .where(
-                SongRequest.track_uri == track.uri,
-                SongRequest.status.in_(SONG_COUNTED),
-                SongRequest.requested_at >= window_start,
+        #
+        # Ang paghahambing ay sa pamagat at artist at hindi sa track URI. Ang
+        # isang awit ay may hiwalay na URI kada paglabas — single, album,
+        # remaster, compilation — kaya ang URI lang ay nagpapapasok ng paulit-ulit
+        # na kanta sa isang pindot lang ng ibang linya sa parehong search results.
+        #
+        # Ang mga row ay kinukuha at inihahambing sa Python dahil ang susi ay
+        # kailangang i-normalize. Sa isang party ay dose-dosenang row lang ito sa
+        # loob ng window, at ang alternatibo ay bagong column at bagong schema.
+        recent_rows = (
+            await db.execute(
+                select(SongRequest.status, SongRequest.track_name, SongRequest.artist_name)
+                .where(
+                    SongRequest.status.in_(SONG_COUNTED),
+                    SongRequest.requested_at >= window_start,
+                )
+                .order_by(SongRequest.requested_at.desc())
+                .limit(_DUPLICATE_SCAN_LIMIT)
             )
-            .order_by(SongRequest.requested_at.desc())
-            .limit(1)
-        )
-        if already is not None:
+        ).all()
+
+        wanted = track_key(track.name, track.artist)
+        for row_status, row_name, row_artist in recent_rows:
+            if track_key(row_name, row_artist) != wanted:
+                continue
             raise RadioError(
                 f"{track.name} just played."
-                if already == SONG_PLAYED
+                if row_status == SONG_PLAYED
                 else f"{track.name} is already in the queue.",
                 reason="duplicate",
             )
@@ -402,6 +422,18 @@ async def record_request(
     db.add(record)
     await db.flush()
     return record
+
+
+async def mark_failed(db: AsyncSession, record: SongRequest, *, reason: str) -> None:
+    """Ilabas sa queue ang request na tinanggihan ng Spotify.
+
+    Kailangang lumabas ito sa `queued`: may unique index doon kada track, kaya
+    ang kantang hindi kailanman tumugtog ay babara sa index nang habambuhay kung
+    maiiwan itong nakapila.
+    """
+    record.status = SONG_FAILED
+    record.failure_reason = reason[:64]
+    await db.flush()
 
 
 async def pending_requests(db: AsyncSession, *, limit: int = 30) -> list[dict[str, object]]:
@@ -529,6 +561,7 @@ __all__ = [
     "get_state_store",
     "guard_request",
     "guest_by_token",
+    "mark_failed",
     "mark_played",
     "now_playing_payload",
     "pending_requests",

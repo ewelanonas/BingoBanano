@@ -8,6 +8,7 @@ ay pinapalitan.
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import AsyncIterator
 from datetime import timedelta
 
@@ -424,7 +425,11 @@ async def test_duplicate_track_is_refused(
 async def test_duplicate_check_expires_with_the_window(
     configured: AsyncClient, operator_headers: dict[str, str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Pagkalipas ng window, puwede nang i-request muli ang kanta."""
+    """Pagkalipas ng window, puwede nang i-request muli ang kantang tapos na.
+
+    Ang window ay tungkol sa "gaano katagal pagkatapos tumugtog", kaya kailangang
+    lumabas na ito sa queue bago mag-usap tungkol sa expiry.
+    """
     connect_store()
     stub_spotify(monkeypatch)
     ana = await _play_token(configured, operator_headers, "Ana")
@@ -434,15 +439,140 @@ async def test_duplicate_check_expires_with_the_window(
         await configured.post(f"/api/radio/{ana}/request", json={"track_uri": TRACK.uri})
     ).status_code == 200
 
+    stub_now_playing(monkeypatch, TRACK)
+    await configured.get(f"/api/radio/{ana}/now-playing")
+
     async with get_session_factory()() as db:
         record = await db.scalar(select(SongRequest))
         assert record is not None
+        assert record.status == "played"
         record.requested_at = utcnow() - timedelta(minutes=90)
         await db.commit()
 
     assert (
         await configured.post(f"/api/radio/{ben}/request", json={"track_uri": TRACK.uri})
     ).status_code == 200
+
+
+async def test_a_queued_song_is_blocked_no_matter_how_old(
+    configured: AsyncClient, operator_headers: dict[str, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Habang nakapila, hindi puwedeng maulit — kahit lumipas na ang window.
+
+    Ang window ay hindi nagpapahintulot ng dalawang kopya sa queue. Ito ang
+    hangganang hawak ng unique index at hindi ng Python check.
+    """
+    connect_store()
+    stub_spotify(monkeypatch)
+    ana = await _play_token(configured, operator_headers, "Ana")
+    ben = await _play_token(configured, operator_headers, "Ben")
+
+    await configured.post(f"/api/radio/{ana}/request", json={"track_uri": TRACK.uri})
+
+    async with get_session_factory()() as db:
+        record = await db.scalar(select(SongRequest))
+        assert record is not None
+        record.requested_at = utcnow() - timedelta(minutes=90)
+        await db.commit()
+
+    blocked = await configured.post(f"/api/radio/{ben}/request", json={"track_uri": TRACK.uri})
+    assert blocked.status_code == 409
+    assert await _statuses() == ["queued"]
+
+
+async def test_same_song_under_a_different_track_id_is_refused(
+    configured: AsyncClient, operator_headers: dict[str, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Ang butas na aktuwal na natagpuan sa party.
+
+    Ang isang awit ay may hiwalay na track ID kada paglabas — single, album,
+    remaster, compilation — at magkatabi ang mga ito sa search results. Ang
+    paghahambing ng URI lang ay nagpapapasok ng paulit-ulit na kanta sa isang
+    pindot ng ibang linya sa parehong listahan.
+    """
+    remaster = spotify.Track(
+        uri="spotify:track:5AbCdEfGhIjKlMnOpQrStU",
+        name=f"{TRACK.name} - Remastered 2011",
+        artist=f"{TRACK.artist}, Jolina Magdangal",
+        duration_ms=TRACK.duration_ms,
+        art_url="",
+    )
+
+    async def fake_fetch(*, access_token: str, track_uri: str) -> spotify.Track:
+        return TRACK if track_uri == TRACK.uri else remaster
+
+    async def fake_queue(*, access_token: str, track_uri: str) -> None:
+        return None
+
+    monkeypatch.setattr(spotify, "fetch_track", fake_fetch)
+    monkeypatch.setattr(spotify, "add_to_queue", fake_queue)
+    connect_store()
+    ana = await _play_token(configured, operator_headers, "Ana")
+    ben = await _play_token(configured, operator_headers, "Ben")
+
+    assert (
+        await configured.post(f"/api/radio/{ana}/request", json={"track_uri": TRACK.uri})
+    ).status_code == 200
+
+    blocked = await configured.post(f"/api/radio/{ben}/request", json={"track_uri": remaster.uri})
+    assert blocked.status_code == 409
+    assert "already in the queue" in blocked.json()["detail"]
+    assert await _statuses() == ["queued"]
+
+
+async def test_concurrent_requests_for_one_song_insert_once(
+    configured: AsyncClient, operator_headers: dict[str, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Dobleng pindot at dalawang phone na sabay pumili.
+
+    Ang Python check ay check-then-act: pareho munang makikitang wala pang row
+    bago pa makapag-insert ang alinman. Ang unique index ang tunay na panangga,
+    at hindi dapat umabot sa Spotify ang pangalawa — hindi na mababawi ang
+    kantang nailagay na sa queue doon.
+    """
+    connect_store()
+    queued = stub_spotify(monkeypatch)
+    ana = await _play_token(configured, operator_headers, "Ana")
+    ben = await _play_token(configured, operator_headers, "Ben")
+
+    results = await asyncio.gather(
+        configured.post(f"/api/radio/{ana}/request", json={"track_uri": TRACK.uri}),
+        configured.post(f"/api/radio/{ben}/request", json={"track_uri": TRACK.uri}),
+    )
+
+    codes = sorted(response.status_code for response in results)
+    assert codes == [200, 409]
+    assert await _statuses() == ["queued"]
+    assert queued == [TRACK.uri]
+
+
+async def test_a_refused_song_does_not_block_the_queue_slot(
+    configured: AsyncClient, operator_headers: dict[str, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Ang kantang hindi kailanman tumugtog ay hindi puwedeng bumara sa index.
+
+    Kung mananatili itong `queued`, ang unique index ay hindi na papayag na
+    ma-request muli ang kantang iyon habambuhay.
+    """
+    connect_store()
+    stub_spotify(
+        monkeypatch,
+        queue_error=spotify.SpotifyError("no device", reason="no_active_device"),
+    )
+    ana = await _play_token(configured, operator_headers, "Ana")
+    ben = await _play_token(configured, operator_headers, "Ben")
+
+    assert (
+        await configured.post(f"/api/radio/{ana}/request", json={"track_uri": TRACK.uri})
+    ).status_code == 502
+    assert await _statuses() == ["failed"]
+
+    # Bumalik na ang Spotify. Puwede nang subukan muli ang parehong kanta.
+    queued = stub_spotify(monkeypatch)
+    assert (
+        await configured.post(f"/api/radio/{ben}/request", json={"track_uri": TRACK.uri})
+    ).status_code == 200
+    assert queued == [TRACK.uri]
 
 
 async def test_long_track_is_refused(

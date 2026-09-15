@@ -24,6 +24,7 @@ from sqlalchemy import (
     String,
     TypeDecorator,
     UniqueConstraint,
+    text,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
@@ -291,7 +292,27 @@ class SongRequest(Base):
 
     player: Mapped[Player] = relationship()
 
-    __table_args__ = (Index("ix_song_request_track_time", "track_uri", "requested_at"),)
+    __table_args__ = (
+        Index("ix_song_request_track_time", "track_uri", "requested_at"),
+        Index("ix_song_request_status_time", "status", "requested_at"),
+        # Isang bersyon lang ng kanta ang puwedeng nakapila kada sandali.
+        #
+        # Partial unique index, at hindi Python check, dahil ang Python check ay
+        # check-then-act: dalawang sabay na request ay pareho munang makikitang
+        # walang row bago pa makapag-insert ang alinman. Dito nahuhuli ang
+        # dobleng pindot at ang dalawang phone na sabay pumili.
+        #
+        # `status = 'queued'` lang ang saklaw. Kapag natapos na ang kanta ay
+        # `played` na iyon, kaya puwede nang maulit — ang duplicate window naman
+        # ang humahawak sa "gaano katagal bago puwedeng ulitin".
+        Index(
+            "uq_song_request_queued_track",
+            "track_uri",
+            unique=True,
+            sqlite_where=text("status = 'queued'"),
+            postgresql_where=text("status = 'queued'"),
+        ),
+    )
 
 
 class AuditEvent(Base):
